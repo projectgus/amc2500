@@ -232,7 +232,7 @@ class AMC2500:
         self.set_speed(slow)
         self.move_by(0,small if ly > 0 else -1*small)
         if self.limits[1] != ly:
-            _error("Failed to find Y limit %d, got limit value %d" % (ly, self.limits[1]))
+            self._error("Failed to find Y limit %d, got limit value %d" % (ly, self.limits[1]))
         self.set_speed(old_speed)
         if zero_there:
             self.zero_here()
