@@ -181,9 +181,9 @@ class AMC2500:
     def move_by(self, dx, dy):
         if dx == 0 and dy == 0:
             return (0,0) # sending DA0,0,0 locks up controller!
-        if dx > 0 and self.limits[0] == -1 or dx < 0 and self.limits[0] == 1:    
+        if self.limits[0] != 0 and (dx * self.limits[0] < 0) :
             self.limits = (0, self.limits[1])
-        if dy > 0 and self.limits[1] == -1 or dy < 0 and self.limits[1] == 1:    
+        if self.limits[1] != 0 and (dy * self.limits[1] < 0) :
             self.limits = (self.limits[0], 0)
       
         # todo: calculate an appropriate timeout based on our known stepping rate
