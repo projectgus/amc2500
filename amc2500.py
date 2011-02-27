@@ -151,14 +151,21 @@ class AMC2500:
 
     You need to follow this command with a stop_jog command
     """
-    def jog(x, y, jog_speed=1000):
+    def jog(self, x, y, jog_speed=1000):
+      if( x != 0 and y != 0 ):
+        self._error("You can't jog two axes at once")
+
+      def jog_dir(a):
+        return "0" if a == 0 else "+" if a > 0 else "-"
+
+      if x != 0:
         self._write("VJ%d" % jog_speed)
-        def jog_dir(a):
-            return "0" if x == 0 else "+" if x > 1 else "-"
         self._write("JAX%s" % jog_dir(x))
+      if y != 0:
         self._write("VJ%d" % jog_speed)
         self._write("JAY%s" % jog_dir(y))
-        self.jogging = True
+     
+      self.jogging = True
         
     """
     Stop jogging and update the internal position of the motor
@@ -171,7 +178,8 @@ class AMC2500:
         if not self.jogging:
             self._error("Not jogging, stop makes no sense")
         self.jogging = False
-        return self._write_pos("JA0", SHORT_TIMEOUT)
+        self._write_pos("JAX0", SHORT_TIMEOUT)
+        self._write_pos("JAY0", SHORT_TIMEOUT)
     
     """
     Move the axis by a certain number of units dx & dy
