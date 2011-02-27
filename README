@@ -1,0 +1,13 @@
+This is a rough attempt at working with the AMC2500 stepper controller via a serial port, 
+from Python code.
+
+amc2500 is a simple Python module for sending commands to the controller
+gcode is a parser for a simple subset of gcode (aiming for the commands used by Inkscape gcodetools)
+
+This has no more work done than idle time over a weekend at the moment, so don't expect too much. :)
+
+
+It's all implemented via sniffing the serial protocol, unsupported, and may never work properly (looks like we may be removing the
+AMC2500 from our PCB Engraver and driving it directly from EMC via parallel port.)
+
+Still... enjoy :)
