@@ -1,28 +1,33 @@
 """
-A simple incomplete Python g-code parser using pyparsing
+A simple incomplete Python g-code parser module using pyparsing
 
 At this point it is intended to support the subset of g-code dumped by the Inkscape
 gcodetools plugin. http://www.cnc-club.ru/forum/viewtopic.php?f=15&t=35&start=0
 
-For use with AMC2500 reverse-engineered python driver
+It doesn't do much by itself, see also amc2500_gcode.py for an implementation to work with the
+AMC2500 CNC controller.
 """
 
 from pyparsing import *
-import sys, fileinput
+import sys
 
-def parse(filename):    
-    ast = [ command_line.parseString(line).asList() for line in fileinput.input() ]
+"""
+Evaluate a gcode file, including evaluating variable/parameter values to their final values,
+and return a list of "command objects" that can then be used for actions.
+
+command_classes is a dict of supported command names mapping to the classes that are instantiated, ie
+{ "G00" : CmdG00,  "G01" : CmdG01,   etc. }    
+
+Each class needs to take a constructor of the form (args, comments) where args is a dict of supplied arguments (values evaluated to floats) and comments is a list of comment strings attached to the command (normally only one.)
+
+The function returns a list of these instantiated objects, or throws an error if a parse problem occurs.
+"""
+def parse(command_classes, filename):    
+    ast = script.parseString(open(filename).read()).asList()
+    for c in ast:
+        print c
     variables = { }    
 
-    command_classes = {
-        "G00" : CmdG00,
-        "G01" : CmdG01,
-        "G02" : CmdG02,
-        "G03" : CmdG03,
-        "M2"  : CmdM2,
-        "M3"  : CmdM3,
-        "M5"  : CmdM5,
-        }    
     def evaluate_expr(expr):
         if isinstance(expr, list) and len(expr) == 3 and expr[0] in opn: # expression
             res = opn[expr[0]](evaluate_expr(expr[1]), evaluate_expr(expr[2]))
@@ -36,7 +41,7 @@ def parse(filename):
 
     def evaluate_command(command):        
         if command[0] == "Comment":
-            return Comment(command[1])
+            return command_classes["Comment"](command[1])
         if not isinstance(command[0],str):
             print "Misparsed command %s" % command
         elif command[0] in command_classes: # command
@@ -53,72 +58,7 @@ def parse(filename):
 
     evl = [ evaluate_command(command) for command in ast if len(command) > 0 ]
     evl = [ c for c in evl if c is not None ]
-    for e in evl:
-        print e
-
-# Command classes #                
-
-class Comment:
-    def __init__(self, comment):
-        self.comment = comment
-    def __repr__(self):
-        return "Comment %s" % comment
-
-class CmdCommon:
-    def __init__(self, args, comments):
-        self.args = args
-        self.comments = comments
-
-class CmdG00(CmdCommon):
-    def __init__(self, args, comments):
-        CmdCommon.__init__(self, args, comments)
-
-    def __repr__(self):
-        return "G00 %s %s" % (self.args, self.comments)
-
-class CmdG01(CmdCommon):
-    def __init__(self, args, comments):
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G01 %s %s" % (self.args, self.comments)
-
-
-class CmdG02(CmdCommon):
-    def __init__(self, args, comments):
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G02 %s %s" % (self.args, self.comments)
-
-
-class CmdG03(CmdCommon):
-    def __init__(self, args, comments):        
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G03 %s %s" % (self.args, self.comments)
-
-
-class CmdM2:
-    def __init__(self, args, comments):        
-        pass
-        
-    def __repr__(self):
-        return "M2"
-
-
-class CmdM3:
-    def __init__(self, args, comments):        
-        pass        
-    def __repr__(self):
-        return "M3"
-
-class CmdM5:
-    def __init__(self, args, comments):
-        pass    
-    def __repr__(self):
-        return "M5"
- 
-
-
+    return evl
 
 # grammar
 
@@ -140,7 +80,7 @@ variable_ref = Combine( Literal("#") + integer )
 
 # commands
 expr = Forward()
-command_arg = Group(Word(alphas, max=1) + expr)
+command_arg = Group(Word("XYZIJKF", max=1) + expr)
 
 comment = Literal("(").suppress() + Regex(r"[^\)]+").setParseAction(lambda t:t.insert(0,"Comment")) + Literal(")").suppress()
 m_command = Combine(Literal("M") + integer) + Optional(Group(comment))
@@ -148,7 +88,11 @@ g_command = Combine(Literal("G") + integer) + ZeroOrMore(command_arg) + Optional
 assignment = variable_ref + Literal("=").suppress() + expr + Optional(Group(comment))                                                                      
 
 command = (m_command | g_command | assignment) #.setParseAction(lambda t:t.insert(0,"Command"))
-command_line = ( command | comment | Literal("%").suppress() ) + StringEnd()
+command_line = Group( command | comment )
+
+ignore = ( Literal("%") )
+line = LineStart() + ZeroOrMore(command_line|ignore.suppress()) + LineEnd()
+script = OneOrMore(line) + StringEnd()
 
 
 # arithmetic expressions
@@ -171,9 +115,4 @@ opn = { "+" : ( lambda a,b: a + b ),
         "*" : ( lambda a,b: a * b ),
         "/" : ( lambda a,b: a / b ) 
         }
-
-def main():
-    parse(sys.argv[1])
-
-if __name__ == "__main__":
-    main()
+ 
