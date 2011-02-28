@@ -158,6 +158,11 @@ class AMC2500:
       def jog_dir(a):
         return "0" if a == 0 else "+" if a > 0 else "-"
 
+      if self.limits[0] != 0 and (x * self.limits[0] < 0) :
+          self.limits = (0, self.limits[1])
+      if self.limits[1] != 0 and (y * self.limits[1] < 0) :
+          self.limits = (self.limits[0], 0)
+
       if x != 0:
         self._write("VJ%d" % jog_speed)
         self._write("JAX%s" % jog_dir(x))
