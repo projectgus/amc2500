@@ -2,15 +2,6 @@
 import re
 
 import wx
-try:
-  from wx import glcanvas
-except ImportError:
-  raise ImportError, "can't go on without wx.glcanvas"
-
-try:
-  from OpenGL.GL import *
-except ImportError:
-  raise ImportError, "can't go on without OpenGL.GL"
 
 from amc2500 import *
 
