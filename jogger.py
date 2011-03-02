@@ -5,6 +5,8 @@ import wx
 
 from amc2500 import *
 
+STEPS_PER_MM=(1/0.006350)
+
 class GotoXYPanel(wx.Panel):
   def __init__(self,parent):
     wx.Panel.__init__(self,parent)
@@ -123,6 +125,38 @@ class ToolControlPanel(wx.Panel):
     self.SetAutoLayout(1)
     self.sizer.Fit(self)
 
+class PreviewPanel(wx.Panel):
+        def __init__(self, parent):
+            wx.Panel.__init__( self,parent, size=(390,460))
+            self.parent = parent
+            sizer = wx.BoxSizer( wx.VERTICAL )
+            self.canvas = wx.Panel(self, size=(390,460))
+            sizer.Add( self.canvas )
+            self.canvas.Bind(wx.EVT_PAINT, self.OnPaint)
+            self.canvas.Bind(wx.EVT_LEFT_DOWN, self.OnClick)
+            self.SetSizer(sizer)
+            self.SetAutoLayout(1)
+            self.Show(1)
+                       
+        def OnPaint(self, event):
+            dc = wx.PaintDC(event.GetEventObject())
+            self.Clear(dc)
+            
+        def Clear(self, dc):
+            dc.Clear()
+            dc.SetPen(wx.Pen("DARKGREY", 1))
+            dc.DrawRectangle(0,0,390,431)
+            dc.DrawRectangle(55,160,322,271)
+            dc.DrawCircle(224,425,2)
+            
+        def OnClick(self,event):
+          pos = (460-event.GetPosition()[1],event.GetPosition()[0]-55)
+          coords = map(lambda a: int(a*STEPS_PER_MM), pos)
+          self.parent.controller.move_to(coords[0],coords[1])
+          self.parent.UpdateStatus()
+          event.Skip()
+
+
 class MainFrame(wx.Frame):
   def __init__(self,parent,title):
 
@@ -146,24 +180,23 @@ class MainFrame(wx.Frame):
     menubar.Append(filemenu,"&File")
     self.SetMenuBar(menubar)
 
-    self.sizer1 = wx.BoxSizer(wx.HORIZONTAL)
-    self.sizer3 = wx.BoxSizer(wx.HORIZONTAL)
     self.buttons = []
-
-
-    self.buttons.append(wx.Button(self,-1,"Zero Here"))
-    self.Bind(wx.EVT_BUTTON,self.OnZeroHere,self.buttons[-1])
-    self.sizer3.Add(self.buttons[-1],1,wx.EXPAND)
 
     self.gotoXYPanel = GotoXYPanel(self)
 
-    self.sizer = wx.BoxSizer(wx.VERTICAL)
-    self.sizer.Add(ToolControlPanel(self),2,wx.EXPAND)
-    self.sizer.Add(JogPanel(self),3,wx.EXPAND)
-    self.sizer.Add(self.gotoXYPanel,1,wx.EXPAND)
-    self.sizer.Add(FindCornersPanel(self),3,wx.EXPAND)
-    self.sizer.Add(self.sizer3,1,wx.EXPAND)
+    self.controls_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.controls_sizer.Add(ToolControlPanel(self),2,wx.EXPAND)
+    self.controls_sizer.Add(JogPanel(self),3,wx.EXPAND)
+    self.controls_sizer.Add(self.gotoXYPanel,1,wx.EXPAND)
+    self.controls_sizer.Add(FindCornersPanel(self),3,wx.EXPAND)
 
+    self.buttons.append(wx.Button(self,-1,"Zero Here"))
+    self.Bind(wx.EVT_BUTTON,self.OnZeroHere,self.buttons[-1])
+    self.controls_sizer.Add(self.buttons[-1],1,wx.EXPAND)
+
+    self.sizer=wx.BoxSizer(wx.HORIZONTAL)
+    self.sizer.Add(self.controls_sizer,1,wx.EXPAND)
+    self.sizer.Add(PreviewPanel(self),2)
     self.SetSizer(self.sizer)
     self.SetAutoLayout(1)
     self.sizer.Fit(self)
