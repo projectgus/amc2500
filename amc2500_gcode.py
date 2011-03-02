@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 A standalone gcode parser to preview and then engrave a subset of gcode onto an
 AMC2500 CNC controller w/ a QuickCircuit 5000 engraver.
@@ -12,22 +13,22 @@ Guidelines for gcode files:
 """
 
 import sys, wx
-import gcode
+import gcode, amc2500
 
 # dimension in mm, total area the head can cover (limit to limit)
 # and the area inside that which corresponds to the bed
 
 # (placeholder values atm)
-TOTAL_HEIGHT=350
+TOTAL_HEIGHT=300
 TOTAL_WIDTH=300
 
-BED_HEIGHT=300
-BED_WIDTH=290
-BED_X = 5
-BED_Y = 10
+BED_HEIGHT=290
+BED_WIDTH=200
+BED_X = 90
+BED_Y = 5
 
 # how much larger should the preview be than real life (ie pixel:mm)?
-PREVIEW_SCALE=2
+PREVIEW_SCALE=1.6
 def scale(d):
     if isinstance(d, tuple):
         return tuple(scale(list(d)))
@@ -76,6 +77,10 @@ class Comment:
         print self
         return state
 
+    def render_move(self, controller):
+        print self
+
+
 class CmdCommon:
     def __init__(self, args, comments):
         self.args = args
@@ -118,7 +123,19 @@ class CmdCommon:
         state.y = y
         return state
 
-
+    def render_line_common(self, controller):
+        if "F" in self.args:
+            f = self.args["F"] # mm/min
+            controller.set_speed(f/60)
+        if "Z" in self.args:
+            z = self.args["Z"]
+            controller.head_down(z <= 0)        
+            
+    def render_line_move(self, controller):
+        CmdCommon.render_line_common(self, controller)
+        x = self.args.get("X", controller.get_pos()[0])
+        y = self.args.get("Y", controller.get_pos()[1])
+        controller.move_to(x, y)
 
 
 """ G00 - high speed move (slew)
@@ -133,6 +150,9 @@ class CmdG00(CmdCommon):
     def render_preview(self, state, dc):
         return CmdCommon.render_preview_line(self, state,dc)
 
+    def render_move(self, controller):
+        CmdCommon.render_line_move(self, controller)        
+
 """ G01 - linear move (machine)
 """
 class CmdG01(CmdCommon):
@@ -143,7 +163,9 @@ class CmdG01(CmdCommon):
 
     def render_preview(self, state, dc):
         return CmdCommon.render_preview_line(self, state,dc)
-        
+
+    def render_move(self, controller):
+        CmdCommon.render_line_move(self, controller)                
         
 """ G02 - CW 2D circular move (using IJ params, K params make no sense here)
 """
@@ -155,6 +177,9 @@ class CmdG02(CmdCommon):
 
     def render_preview(self, state, dc):
         return CmdCommon.render_preview_arc(self, state, dc, True)
+
+    def render_move(self, controller):
+        CmdCommon.render_line_move(self, controller)        
 
 
 """ G03 - CCW 2D circular move (using IJ params, K params make no sense here)
@@ -168,6 +193,9 @@ class CmdG03(CmdCommon):
     def render_preview(self, state, dc):
         return CmdCommon.render_preview_arc(self,state,dc, False)
 
+    def render_move(self, controller):
+        CmdCommon.render_line_move(self, controller)        
+
 """ G21 - set mm mode. this is all we support atm anyhow ;)
 """
 class CmdG21(CmdCommon):
@@ -178,6 +206,11 @@ class CmdG21(CmdCommon):
 
     def render_preview(self, state, dc):
         return CmdCommon.render_preview(self,state,dc)
+
+    def render_move(self, controller):
+        controller.set_units_mm() # its not this simple if we're already running but
+        # it is OK for now
+
 
 """ M2 - end of program 
 """
@@ -190,6 +223,10 @@ class CmdM2:
 
     def render_preview(self, state, dc):
         return state
+
+    def render_move(self, controller):
+        pass
+
 
 
 """ M3 - spindle on
@@ -204,6 +241,9 @@ class CmdM3:
         state.spindle_on = True
         return state
 
+    def render_move(self, controller):
+        controller.spindle(True)
+
 """ M5 - spindle off
 """
 class CmdM5:
@@ -215,20 +255,30 @@ class CmdM5:
     def render_preview(self, state, dc):
         state.spindle_on = False
         return state
- 
+
+    def render_move(self, controller):
+        controller.spindle(False)
+
+
 
 class PreviewFrame(wx.Frame):
         def __init__(self, commands):
             wx.Frame.__init__( self,
                                None, -1, "Plot Preview",
                                size=(scale(TOTAL_WIDTH),
-                                     scale(TOTAL_HEIGHT)+100),
+                                     scale(TOTAL_HEIGHT)+40),
                                style=wx.DEFAULT_FRAME_STYLE )
             self.commands = commands
-            sizer = wx.BoxSizer( wx.VERTICAL )
             self.canvas = wx.Panel(self, size=scale((TOTAL_WIDTH,TOTAL_HEIGHT)))
-            sizer.Add( self.canvas )
             self.canvas.Bind(wx.EVT_PAINT, self.on_paint)
+
+            self.btn_print = wx.Button(self, label="Print")
+            self.Bind(wx.EVT_BUTTON,self.on_print,self.btn_print)
+
+            # layout
+            sizer = wx.BoxSizer( wx.VERTICAL )
+            sizer.Add(self.btn_print)
+            sizer.Add( self.canvas )
             self.SetSizer(sizer)
             self.SetAutoLayout(1)
             self.Show(1)
@@ -251,10 +301,31 @@ class PreviewFrame(wx.Frame):
             dc.SetPen(wx.Pen("DARKGREY", 4))
             dc.DrawRectangle(scale(BED_X), scale(BED_Y), 
                               scale(BED_WIDTH), scale(BED_HEIGHT))
-            
-            
-        
-        
+
+        def on_print(self, event):
+            controller = amc2500.AMC2500()
+            controller.zero()
+            controller.set_units_mm()
+            controller.set_spindle_speed(5000)
+            #controller.move_to(100,1)
+            #controller.zero_here()
+            home = True
+            for comm in self.commands:
+                print comm
+                comm.render_move(controller)              
+                home = home and controller.limits == (-1,-1) # still on home?
+                if controller.limits != (0,0) and not home:
+                    dlg = wx.MessageDialog( 
+                        self, 
+                        "Hit limits %s! Engraving will stop now :(" % (controller.limits,), 
+                        "AMC2500", 
+                        wx.OK
+                        )                    
+                    dlg.ShowModal() # Show it
+                    dlg.Destroy() # finally destroy it when finished.
+                    controller.zero()
+                    break
+
 
 
 

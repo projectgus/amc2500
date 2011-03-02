@@ -75,8 +75,12 @@ class AMC2500:
 
 
     def _steps_to_units(self, steps):
+        if isinstance(steps, tuple):
+            return tuple([ self._steps_to_units(s) for s in list(steps) ])
         return steps / self.steps_per_unit
     def _units_to_steps(self, units):
+        if isinstance(units, tuple):
+            return tuple([ self._units_to_steps(u) for u in list(units) ])
         return units * self.steps_per_unit
 
     
@@ -109,10 +113,10 @@ class AMC2500:
     """
     def set_speed(self, speed):    
         self.speed = speed
-        steps_per_second = self._units_to_steps(speed)
-        #self._write("VS%d" % steps_per_second / 4)                
+        steps_per_second = int(self._units_to_steps(speed))
+        self._write("VS%d" % (steps_per_second / 4)) ## ???                
         self._write("VM%d" % steps_per_second)
-        #self._write("AT%d" % 20)
+        self._write("AT%d" % (20 if steps_per_second > 1000 else 10)) ## ??
 
     """
     Set the spindle speed in rpm
@@ -192,13 +196,16 @@ class AMC2500:
     If successful, returns the actual number of units moved as a tuple (dx,dy)
     """
     def move_by(self, dx, dy):
-        if dx == 0 and dy == 0:
-            return (0,0) # sending DA0,0,0 locks up controller!
         if self.limits[0] != 0 and (dx * self.limits[0] < 0) :
             self.limits = (0, self.limits[1])
         if self.limits[1] != 0 and (dy * self.limits[1] < 0) :
             self.limits = (self.limits[0], 0)
       
+        dx_s = self._units_to_steps(dx)
+        dy_s = self._units_to_steps(dy)
+        if(int(dx_s) == 0 and int(dy_s) == 0):
+            return # sending 0,0 breaks the controller
+
         # todo: calculate an appropriate timeout based on our known stepping rate
         return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dx), 
                                       self._units_to_steps(dy)), 180)
@@ -224,6 +231,8 @@ class AMC2500:
     Works by stepping quickly to the limit, backing off slowly, then moving in slowly to the limit again
     """
     def find_corner(self, lx, ly, zero_there=False):
+        self.head_down(False)
+        self.spindle(False)
         old_speed=self.speed
         fast=self._steps_to_units(8000)
         slow=self._steps_to_units(250)
@@ -265,7 +274,10 @@ class AMC2500:
             print "%s D %s" % (ts(), msg)
     
     def _write(self, cmd, response_timeout_s=None):
-        CMD_SLEEP=0.005
+        CMD_SLEEP=0.01
+        while self.ser.inWaiting() > 0:
+            dumped = self.ser.read(self.ser.inWaiting())
+            print "WARNING dumping unexpected %d chars '%s'" % (len(dumped),dumped)
         self.ser.write("%s\n" % cmd)        
         if self.trace:
             print "%s W %s" % (ts(), cmd)
@@ -281,7 +293,8 @@ class AMC2500:
                 rsp.append(ln)
                 if self.trace:
                     print "%s R %s" % (ts(), ln)                
-                time.sleep(CMD_SLEEP)
+                if not ln.startswith("OK"):
+                    time.sleep(CMD_SLEEP)
                 if ser.inWaiting() > 0:
                         continue
                 break
