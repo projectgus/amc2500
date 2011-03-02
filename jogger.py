@@ -90,6 +90,38 @@ class JogPanel(wx.Panel):
     self.SetAutoLayout(1)
     self.sizer.Fit(self)
 
+class ToolControlPanel(wx.Panel):
+  def __init__(self,parent):
+    wx.Panel.__init__(self,parent)
+    self.parent = parent
+  
+    self.sizer = wx.BoxSizer(wx.VERTICAL)
+    self.sizer1 = wx.BoxSizer(wx.HORIZONTAL)
+    self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)
+
+    self.buttons = []
+
+    self.buttons.append(wx.Button(self,-1,"HeadUp"))
+    self.Bind(wx.EVT_BUTTON,self.parent.OnHeadUp,self.buttons[-1])
+    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
+
+    self.buttons.append(wx.Button(self,-1,"HeadDown"))
+    self.Bind(wx.EVT_BUTTON,self.parent.OnHeadDown,self.buttons[-1])
+    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
+
+    self.buttons.append(wx.Button(self,-1,"SpindleOn"))
+    self.Bind(wx.EVT_BUTTON,self.parent.OnSpindleOn,self.buttons[-1])
+    self.sizer2.Add(self.buttons[-1],1,wx.EXPAND)
+
+    self.buttons.append(wx.Button(self,-1,"SpindleOff"))
+    self.Bind(wx.EVT_BUTTON,self.parent.OnSpindleOff,self.buttons[-1])
+    self.sizer2.Add(self.buttons[-1],1,wx.EXPAND)
+
+    self.sizer.Add(self.sizer1,1,wx.EXPAND)
+    self.sizer.Add(self.sizer2,1,wx.EXPAND)
+    self.SetSizer(self.sizer)
+    self.SetAutoLayout(1)
+    self.sizer.Fit(self)
 
 class MainFrame(wx.Frame):
   def __init__(self,parent,title):
@@ -118,21 +150,6 @@ class MainFrame(wx.Frame):
     self.sizer3 = wx.BoxSizer(wx.HORIZONTAL)
     self.buttons = []
 
-    self.buttons.append(wx.Button(self,-1,"HeadUp"))
-    self.Bind(wx.EVT_BUTTON,self.OnHeadUp,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
-
-    self.buttons.append(wx.Button(self,-1,"HeadDown"))
-    self.Bind(wx.EVT_BUTTON,self.OnHeadDown,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
-
-    self.buttons.append(wx.Button(self,-1,"SpindleOn"))
-    self.Bind(wx.EVT_BUTTON,self.OnSpindleOn,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
-
-    self.buttons.append(wx.Button(self,-1,"SpindleOff"))
-    self.Bind(wx.EVT_BUTTON,self.OnSpindleOff,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
 
     self.buttons.append(wx.Button(self,-1,"Zero Here"))
     self.Bind(wx.EVT_BUTTON,self.OnZeroHere,self.buttons[-1])
@@ -141,7 +158,7 @@ class MainFrame(wx.Frame):
     self.gotoXYPanel = GotoXYPanel(self)
 
     self.sizer = wx.BoxSizer(wx.VERTICAL)
-    self.sizer.Add(self.sizer1,1,wx.EXPAND)
+    self.sizer.Add(ToolControlPanel(self),2,wx.EXPAND)
     self.sizer.Add(JogPanel(self),3,wx.EXPAND)
     self.sizer.Add(self.gotoXYPanel,1,wx.EXPAND)
     self.sizer.Add(FindCornersPanel(self),3,wx.EXPAND)
