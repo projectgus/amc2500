@@ -23,6 +23,9 @@ STEPS_PER_MM=(1/0.006350)
 MAX_RPM=5000
 MIN_RPM=1000
 
+MOVEABLE_WIDTH = (300 * STEPS_PER_MM) # rough, TODO: measure properly and update
+MOVEABLE_HEIGHT=MOVEABLE_WIDTH
+
 SHORT_TIMEOUT=0.5
 
 """
@@ -33,6 +36,7 @@ Code developed through protocol reverse engineering, so who knows if it will wor
 Notable properties:
 
 pos - this is where the controller thinks it is, in steps
+limits - these are the limits the controller thinks it has hit (X,Y) as 0,-1,1 for Off,-+
 
 """
 class AMC2500:
@@ -47,14 +51,12 @@ class AMC2500:
                  port='/dev/ttyUSB0',
                  debug=True,
                  trace=True):
-        self.ser = serial.Serial(
-            port=port,
-            baudrate=9600)
+        self.ser = self._get_serial(port)
         self.ser.open()
         self.trace=trace
         self.debug=debug
         self.pos = (0,0)  # pos is always stored internally in steps
-        self.limits = (0,0) # x and y, each limit state can be 0,-1,1 for Off,-,+
+        self.limits = (0,0)
         self.jogging = False
         self.set_units_steps()
         self._debug("Initialising controller on %s..." % port)
@@ -62,6 +64,9 @@ class AMC2500:
         self._write("EO0", SHORT_TIMEOUT)
         self.set_speed(4000)
     
+
+    def _get_serial(self, port):
+        return serial.Serial(port=port, baudrate=9600)
 
     def set_units(self, steps_per_unit):
         self._debug("Setting units to %d steps/unit" % steps_per_unit)
@@ -259,8 +264,7 @@ class AMC2500:
         if zero_there:
             self.zero_here()
 
-    """
-    Zero the head on the current coordinates without moving it
+    """    Zero the head on the current coordinates without moving it
     """
     def zero_here(self):
         self._debug("Zeroing here (was %d,%d steps)" % self.pos)
@@ -331,8 +335,94 @@ class AMC2500:
                     self._debug("At limits (%d,%d)" % self.limits)
         return (self._steps_to_units(dpos[0]), self._steps_to_units(dpos[1]))
 
+
+"""
+A simulated AMC2500 controller for testing.
+
+Simulated at the serial port level, with a test stub serial port
+"""
+class SimController(AMC2500):
+
+    def __init__(self, 
+                 port='/dev/ttyUSB0',
+                 debug=True,
+                 trace=True):
+        AMC2500.__init__(self, port, debug, trace)
+
+    def _get_serial(self, port):
+        return FakeSerial()
+
+# A fake serial port, like serial() but fakes its responses
+class FakeSerial:
+    def __init__(self, *args):
+        self.x = 0
+        self.y = 0 # track our own position
+        self.timeout = None
+        self.buffer = [] # what we have waiting to read back to the caller
+
+    def open(self):
+        pass
+
+    def write(self, data):
+        for line in data.split("\n"):
+            move = re.search(_RE_DA, line)
+            if move is not None:
+                move = move.groupdict()
+                dx = int(move["x"])
+                dy = int(move["y"])
+
+                def get_limit(delta, pos, maxx):
+                    pos += delta
+                    limit = 0
+                    if pos > maxx:
+                        limit = 1
+                        delta = delta - (pos - maxx)
+                        pos = maxx
+                    if pos < 0:
+                        limit = -1
+                        delta = delta + pos
+                        pos = 0                
+                    return (delta, pos, limit)
+
+                (dx, self.x, limit_x) = get_limit(dx, self.x, MOVEABLE_WIDTH)
+                (dy, self.y, limit_y) = get_limit(dy, self.y, MOVEABLE_HEIGHT)
+                    
+                if limit_x != 0:
+                    self.buffer.insert(0, "LIX%s,%d,%d,0" % ("+" if limit_x > 0 else "-", dx, dy))
+                if limit_y != 0:
+                    self.buffer.insert(0, "LIY%s,%d,%d,0" % ("+" if limit_y > 0 else "-", dx, dy))
+                if limit_x == 0 and limit_y == 0:
+                    self.buffer.insert(0, "OK%d,%d,0" % (dx, dy))
+            elif line == "IM": # init command
+                self.buffer.insert(0, "ES0,0,0") # <-- don't know what this is
+                self.buffer.insert(1, "")
+            elif re.search(r"^EO.$", line) is not None: # echo on/off
+                self.buffer.insert(0, "echo off")                
+            elif re.search(r"^H.$", line) is not None: # head up/down
+                self.buffer.insert(0, "OK0,0,0")
+            # TODO: recognise jog commands, other commands w/ responses 
+
+        return len(data)
+
+    def readline(self):
+        if len(self.buffer) > 0:
+            return self.buffer.pop(0)
+        else:
+            raise serial.SerialException("Called readline on an empty buffer!")
+
+    def read(self, size):
+        buf = "\n".join(self.buffer)
+        self.buffer = buf[size:].split("\n")
+        print "Returning %s remainder is %s" % (buf[:size], self.buffer)
+        return buf[:size]
+
+    def inWaiting(self):
+        return len("\n".join(self.buffer))
+
+
 _RE_AXES=r"(?P<x>[-\d]+),(?P<y>[-\d]+),(?P<z>[-\d]+)"
 _RE_OK = r"OK" + _RE_AXES
+_RE_DA = r"^DA" + _RE_AXES + "$"
 _RE_LIMIT = r"LI(?P<axis>.)(?P<dir>.)," + _RE_AXES
 
 def ts():

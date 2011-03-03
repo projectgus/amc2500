@@ -27,6 +27,7 @@ BED_WIDTH=200
 BED_X = 90
 BED_Y = 5
 
+
 # how much larger should the preview be than real life (ie pixel:mm)?
 PREVIEW_SCALE=1.6
 def scale(d):
@@ -275,9 +276,13 @@ class PreviewFrame(wx.Frame):
             self.btn_print = wx.Button(self, label="Print")
             self.Bind(wx.EVT_BUTTON,self.on_print,self.btn_print)
 
+            self.chk_simulation = wx.CheckBox(self, label="Simulation Mode")
+            self.chk_simulation.Value = True
+
             # layout
             sizer = wx.BoxSizer( wx.VERTICAL )
             sizer.Add(self.btn_print)
+            sizer.Add(self.chk_simulation) # TODO: non-lame layout
             sizer.Add( self.canvas )
             self.SetSizer(sizer)
             self.SetAutoLayout(1)
@@ -303,7 +308,7 @@ class PreviewFrame(wx.Frame):
                               scale(BED_WIDTH), scale(BED_HEIGHT))
 
         def on_print(self, event):
-            controller = amc2500.AMC2500()
+            controller = amc2500.SimController() if self.chk_simulation.Value else amc2500.AMC2500()
             controller.zero()
             controller.set_units_mm()
             controller.set_spindle_speed(5000)
