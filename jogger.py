@@ -5,8 +5,6 @@ import wx
 
 from amc2500 import *
 
-STEPS_PER_MM=(1/0.006350)
-
 class GotoXYPanel(wx.Panel):
   def __init__(self,parent):
     wx.Panel.__init__(self,parent)
