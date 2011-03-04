@@ -7,8 +7,18 @@ which contains a description of such a system but no implementation code that I 
 And http://www.artima.com/weblogs/viewpost.jsp?thread=101605 in which Guido van Rossum
 shows how dynamic dispatch ("multi-methods") can be done.
 
-Please don't use this module for evil messes, only use it when visitor pattern will actually
+The module has an extra "feature" that by default multiple overloads can be called for a 
+class hierarchy, so if you annotated @when(BaseClass) on one method and then @when(Subclass)
+on another, and make a call that would invoke the subclass method, then the base class method
+is invoked first.
+
+The result of any such "cascaded" superclass call is discarded. If you do not wish a particular
+method call to "cascade" before another call to a subclass, use the second annotation argument
+ie @when(type, False)
+
+Please don't use this module for evil messes :), only use it when a visitor pattern will actually
 eliminate lots of nasty boilerplate code.
+
 
 Simple example:
 
@@ -42,15 +52,23 @@ _methods = {}
 class when(object):
     """ Annotation indicating a method is a dynamic dispatch overload. Argument is the type
     of the first function argument,which will be used for dynamic dispatch.    
+    
+    Arguments:
+    argtype - this method should be invoked only with a first argument that matches (or subclasses)
+              this type
+
+    allow_cascaded_calls - this method will also be invoked if (default True)
+
     """
-    def __init__(self, argtype):
+    def __init__(self, argtype, allow_cascaded_calls=True):
         self.argtype = argtype
+        self.allow_cascade=allow_cascaded_calls
     def __call__(self, func):
-        print "assigning %s to func %s" % (self.argtype, func)
+        #print "assigning %s to func %s" % (self.argtype, func)
         self.func_name =func.__name__
         if not self.func_name in _methods:
             _methods[self.func_name] = method_overload(self.func_name)        
-        _methods[self.func_name].register(self.argtype, func)
+        _methods[self.func_name].register(self.argtype, func, self.allow_cascade)
         return _methods[self.func_name]
 
 
@@ -63,9 +81,11 @@ class method_overload(object):
     def __init__(self, func_name):
         self.func_name = func_name
         self.registry = {}
+        self.allow_cascade = {}
 
-    def register(self, argtype, func):
+    def register(self, argtype, func, allow_cascade):
         self.registry[argtype] = func
+        self.allow_cascade[argtype] = allow_cascade
 
     def __get__(self, obj, type=None):
         """ This __get__ is called when the method is bound on a
@@ -90,12 +110,18 @@ class method_overload(object):
         instance
         """
         argtype = type(args[0])
-        if not argtype in self.registry:
-            raise TypeError("Function %s has no overload registered for type %s" % 
-                            (self.func_name, argtype))
-        func = self.registry[argtype]
-        return func_modifier(func)(*args, **kw)
-
+        hier = list(inspect.getmro(argtype)) # class hierarchy
+        hier.reverse() # order w/ superclass first
+        hier = [ t for t in hier if t in self.registry ]
+        if len(hier) == 0:
+            raise TypeError("Function %s has no compatible overloads registered for argument type %s" % 
+                            (self.func_name, argtype))            
+        result = None
+        for t in hier:
+            if not self.allow_cascade[t] and t != hier[-1]:
+                continue # don't "cascade" down from superclass on this method
+            result = func_modifier(self.registry[t])(*args, **kw)
+        return result
         
 
 class bound_caller(object):
@@ -157,7 +183,7 @@ class Subclass(ClassA):
 @is_visited
 class OtherSample:
     
-    @when(ClassA)
+    @when(ClassA, False)
     def foo(self, a):
         print "foo ClassA %s" % (a)
 
@@ -173,8 +199,6 @@ class OtherSample:
 @when(str)
 def foo(a,b):
     print "unbound str foo %s %s" % (a, b)
-
-
 
 @when(str)
 def myFunc(arg):
