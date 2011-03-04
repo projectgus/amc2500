@@ -25,7 +25,7 @@ class when(object):
         methods[self.func_name].register(self.argtype, func)
         return methods[self.func_name]
 
-# this is the actual overload of a specific method name
+# this is the actual overload information about a specific method name
 class method_overload(object):
     def __init__(self, func_name):
         self.func_name = func_name
@@ -35,17 +35,22 @@ class method_overload(object):
         self.registry[argtype] = func
 
     def __get__(self, obj, type=None):
-        print "method_overload.__get__ %s %s" % (obj, type)
+        return method_caller(self, obj, type)
+
+# this class is instantiated once per(!) method call with the object & the type
+# that will be invoked
+class method_caller(object):
+    def __init__(self, overload, obj, type):
+        self.overload = overload
         self.obj = obj
         self.type = type
-        return self
-
+        
     def __call__(self, *args, **kw):
         argtype = type(args[0])
-        if not argtype in self.registry:
+        if not argtype in self.overload.registry:
             raise TypeError("Function %s has no overload registered for type %s" % 
-                            (self.func_name, argtype))
-        func = self.registry[argtype]
+                            (self.overload.func_name, argtype))
+        func = self.overload.registry[argtype]
         func.__get__(self.obj, self.type)(*args, **kw)
 
 
