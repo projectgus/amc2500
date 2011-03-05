@@ -457,7 +457,7 @@ class FakeSerial:
 
     def readline(self):
         if len(self.buffer) > 0:
-            time.sleep(0.001)
+            time.sleep(0.01)
             return self.buffer.pop(0)
         else:
             raise serial.SerialException("Called readline on an empty buffer!")
