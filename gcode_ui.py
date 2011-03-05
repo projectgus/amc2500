@@ -20,14 +20,14 @@ from visitor import is_visitor, when
 # dimension in mm, total area the head can cover (limit to limit)
 # and the area inside that which corresponds to the bed
 
-# (placeholder values atm)
-TOTAL_HEIGHT=300
-TOTAL_WIDTH=300
+# (reasonably accurate values atm)
+TOTAL_HEIGHT=390
+TOTAL_WIDTH=431
 
-BED_HEIGHT=290
-BED_WIDTH=200
-BED_X = 90
-BED_Y = 5
+BED_HEIGHT=322
+BED_WIDTH=271
+BED_X = 35
+BED_Y = 55
 
 
 # how much larger should the preview be than real life (ie pixel:mm)?
