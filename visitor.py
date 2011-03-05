@@ -7,15 +7,6 @@ which contains a description of such a system but no implementation code that I 
 And http://www.artima.com/weblogs/viewpost.jsp?thread=101605 in which Guido van Rossum
 shows how dynamic dispatch ("multi-methods") can be done.
 
-The module has an extra "feature" that by default multiple overloads can be called for a 
-class hierarchy, so if you annotated @when(BaseClass) on one method and then @when(Subclass)
-on another, and make a call that would invoke the subclass method, then the base class method
-is invoked first.
-
-The result of any such "cascaded" superclass call is discarded. If you do not wish a particular
-method call to "cascade" before another call to a subclass, use the second annotation argument
-ie @when(type, False)
-
 Please don't use this module for evil messes :), only use it when a visitor pattern will actually
 eliminate lots of nasty boilerplate code.
 
@@ -37,11 +28,55 @@ myFunc(12)
 My integer is 12
 
 
+Advanced/Silly features:
+
+Optionally, multiple overloads can be called in sequence when visiting a class hierarchy.
+So, if you have annotated visitor methods for both a superclass and a subclass, the visitor
+pattern will optionally call first the superclass and then the subclass. The result of such "cascaded" superclass calls is discarded.
+
+Example:
+
+class Superclass:
+    pass
+class SubA(Superclass):
+    pass
+class SubB(Superclass):
+    pass
+
+@is_visitor
+class MyVisitor:
+    @when(Superclass, allow_cascaded_calls=True)
+    def foo(s):
+        print "I am a superclass call"
+        return 1
+
+    @when(SubA)
+    def foo(a):
+        print "I am a subclass A call"
+        return 2
+
+v=MyVisitor()
+a=SubA()
+b=SubB()
+
+Output:
+
+v.foo(a)
+I am a superclass call
+I am a subclass call
+2
+
+v.foo(b)
+I am a superclass call
+1
+
+
 Copyright 2011 Angus Gratton. 
 """
 
+import inspect, types
 
-# these are the "current" overloaded methods, the @is_visited annotation
+# these are the "current" overloaded methods, the @is_visitor annotation
 # will blat them out again after the current class is defined (allowing multiple
 # classes to have mixed overloads with the same method name!)
 #
@@ -60,7 +95,7 @@ class when(object):
     allow_cascaded_calls - this method will also be invoked if (default True)
 
     """
-    def __init__(self, argtype, allow_cascaded_calls=True):
+    def __init__(self, argtype, allow_cascaded_calls=False):
         self.argtype = argtype
         self.allow_cascade=allow_cascaded_calls
     def __call__(self, func):
@@ -110,6 +145,10 @@ class method_overload(object):
         instance
         """
         argtype = type(args[0])
+        class Old:
+            pass
+        if argtype is types.InstanceType: # old-style class
+            argtype = args[0].__class__        
         hier = list(inspect.getmro(argtype)) # class hierarchy
         hier.reverse() # order w/ superclass first
         hier = [ t for t in hier if t in self.registry ]
@@ -125,85 +164,61 @@ class method_overload(object):
         
 
 class bound_caller(object):
-    """ Temporary class instantiated once(!!!) per method call for
+    """ Temporary class instantiated once per method call(!!) for
     methods bound to a class, contains the bound instance and its
     class type.
 
-    It may be possible to replace this with a nested function or a
-    lambda function, not sure?
+    (Implementation note: It may be possible to replace this with a nested function or a
+    lambda function, not sure if this would change overhead?)
 
     """
-    def __init__(self, overload, obj, type):
+    def __init__(self, overload, obj, cls):
         self.overload = overload
         self.obj = obj
-        self.type = type
+        self.cls = cls
         
     def __call__(self, *args, **kw):        
-        return self.overload.call_internal(lambda l:l.__get__(self.obj, self.type), args, kw)
+        return self.overload.call_internal(lambda l:l.__get__(self.obj, self.cls), args, kw)
 
 
 
-def is_visited(cls):
+def is_visitor(cls):
     """ Decorator to mark any class which contains one or more @when annotations.
 
     This is needed if more than one class/scope in the module contains an overloaded
     method with the same name. If it is missing from a class, the methods on the next
-    class will not be distinct from the methods on this class.
+    class will not be held distinct from the methods on this class.
 
     """
     global _methods
     _methods = {}
     return cls
 
-@is_visited
-class Sample:
-
-    @when(int)
-    def foo(self, a, b):
-        print "int %s %d %d" % (self, a,b)
-
-    @when(float)
-    def foo(self,a, b, c):
-        print "float %s %f %f %f" % (self, a,b,c)
-
-    @when(str)
-    def foo(self, a, b):
-        print "str %s %s %s" % (self, a,b)
 
 
-class ClassA(object):
-    pass
+class Superclass:
+    def __init__(self):
+        pass
+class SubA(Superclass):
+    def __init__(self):
+        pass
+class SubB(Superclass):
+    def __init__(self):
+        pass
 
-class ClassB(object):
-    pass
+@is_visitor
+class MyVisitor:
+    @when(Superclass, allow_cascaded_calls=True)
+    def foo(self, s):
+        print "I am a superclass call"
+        return 1
 
-class Subclass(ClassA):
-    pass
-
-@is_visited
-class OtherSample:
-    
-    @when(ClassA, False)
+    @when(SubA)
     def foo(self, a):
-        print "foo ClassA %s" % (a)
+        print "I am a subclass A call"
+        return 2
 
-    @when(ClassB)
-    def foo(self, b):
-        print "foo ClassB %s" % (b)
+v=MyVisitor()
+a=SubA()
+b=SubB()
 
-    @when(Subclass)
-    def foo(self, a):
-        print "subclass %s" % (a)
-
-
-@when(str)
-def foo(a,b):
-    print "unbound str foo %s %s" % (a, b)
-
-@when(str)
-def myFunc(arg):
-    print "My string has length %d" % (len(arg))
-    
-@when(int)
-def myFunc(arg):
-    print "My integer is %d" % arg
