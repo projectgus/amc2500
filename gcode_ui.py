@@ -51,47 +51,46 @@ def process(filename):
 class DCRenderer:
     """Renderer to take gcode commands and preview them onto a wxPython DC
     
-       up_color - color to use when moving not engraving
-       down_color - color to use when engraving
-       error_color - color to use when head down but spindle off
+       up_colour - colour to use when moving not engraving
+       down_colour - colour to use when engraving
+       error_colour - colour to use when head down but spindle off
     """
 
-    def __init__(self, up_color="GREY", down_color="BLACK", error_color="DARKRED"):
-        self.up_color = up_color
-        self.down_color = down_color
-        self.error_color = error_color
+    def __init__(self, up_colour="GREY", down_colour="BLACK", error_colour="DARKRED"):
+        self.up_colour = up_colour
+        self.down_colour = down_colour
+        self.error_colour = error_colour
         self.spindle = False
         self.head = False
 
-    def get_color(self, override_color=None):
-        if override_color is not None:
-            return override_color        
+    def get_colour(self, override_colour=None):
+        if override_colour is not None:
+            return override_colour        
         elif self.spindle and self.head:
-            return self.down_color
+            return self.down_colour
         elif self.head:
-            return self.error_color
+            return self.error_colour
         else:
-            return self.up_color
+            return self.up_colour
 
     @when(BaseCommand, allow_cascaded_calls=True)
-    def render(self, cmd, dc, override_color=None):
-        print cmd.comment
+    def render(self, cmd, dc, override_colour=None):
+        pass
 
     @when(LinearCommand, allow_cascaded_calls=True)
-    def render(self, cmd, dc, override_color=None):
+    def render(self, cmd, dc, override_colour=None):
         self.head = cmd.to_z <= 0
-        dc.SetPen(wx.Pen(self.get_color(override_color), PREVIEW_SCALE))
+        dc.SetPen(wx.Pen(self.get_colour(override_colour), PREVIEW_SCALE))
         if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
             return # just a Z movement
         lines = [ scale([cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y]) ]
-        print "Line %s" % lines
         dc.DrawLineList(lines)
         
     @when(M3)
-    def render(self, cmd, dc, override_color=None):
+    def render(self, cmd, dc, override_colour=None):
         self.spindle = True
     @when(M5)
-    def render(self, cmd, dc, override_color=None):
+    def render(self, cmd, dc, override_colour=None):
         self.spindle = False
 
 
@@ -105,28 +104,45 @@ class PreviewFrame(wx.Frame):
             self.commands = commands
             self.canvas = wx.Panel(self, size=scale((TOTAL_WIDTH,TOTAL_HEIGHT)))
             self.canvas.Bind(wx.EVT_PAINT, self.on_paint)
+            self.do_repaint = True
 
-            self.btn_print = wx.Button(self, label="Print")
-            self.Bind(wx.EVT_BUTTON,self.on_print,self.btn_print)
+            self.btn_engrave = wx.Button(self, label="Engrave")
+            self.Bind(wx.EVT_BUTTON,self.on_engrave,self.btn_engrave)
+            self.btn_engrave.SetDefault()
+            self.engraving = False
+
+            self.btn_stop = wx.Button(self, label="Stop")
+            self.Bind(wx.EVT_BUTTON,self.on_stop, self.btn_stop)
+            self.btn_stop.Enabled = False
 
             self.chk_simulation = wx.CheckBox(self, label="Simulation Mode")
             self.chk_simulation.Value = True
 
             # layout
             sizer = wx.BoxSizer( wx.VERTICAL )
-            sizer.Add(self.btn_print)
-            sizer.Add(self.chk_simulation) # TODO: non-lame layout
+            btn_sizer = wx.BoxSizer( wx.HORIZONTAL )
+            chk_sizer = wx.BoxSizer( wx.HORIZONTAL )
+
+            btn_sizer.Add(self.btn_engrave)
+            btn_sizer.Add(self.btn_stop)
+
+            chk_sizer.Add(self.chk_simulation)
+            sizer.Add(btn_sizer)
+            sizer.Add(chk_sizer)
             sizer.Add( self.canvas )
             self.SetSizer(sizer)
             self.SetAutoLayout(1)
             self.Show(1)
                        
         def on_paint(self, event):
+            if not self.do_repaint:
+                return
+            self.do_repaint = False
             dc = wx.PaintDC(event.GetEventObject())
-            renderer = DCRenderer()            
+            self.preview_renderer = DCRenderer(up_colour="LIGHTGREY", down_colour="DARKGREY")            
             self.clear(dc)
             for cmd in self.commands:
-                renderer.render(cmd, dc, None)
+                self.preview_renderer.render(cmd, dc, None)
 
             
         def clear(self, dc):
@@ -135,30 +151,74 @@ class PreviewFrame(wx.Frame):
             dc.DrawRectangle(scale(BED_X), scale(BED_Y), 
                               scale(BED_WIDTH), scale(BED_HEIGHT))
 
-        def on_print(self, event):
+        def on_engrave(self, event):
+            if self.engraving:
+                return # already running
+                        
             try:
                 if self.chk_simulation.Value:
-                    controller = SimController()
+                    self.controller = SimController()
                 else:
-                    controller = AMC2500()                           
-                controller.zero()
-                controller.set_units_mm()
-                controller.set_spindle_speed(5000)
+                    self.controller = AMC2500()                           
+                self.controller.zero()
+                self.controller.set_units_mm()
+                self.controller.set_spindle_speed(5000)
             
-                renderer = AMCRenderer(controller)
-                for comm in self.commands:
-                    renderer.render(comm)
-
+                self.done_renderer = DCRenderer(down_colour="BLACK")
+                self.engrave_renderer = AMCRenderer(self.controller)
+                wx.CallAfter(self.pre_engrave, 0) # need to pump the wx event loop as we engrave
+                self.do_repaint = True
+                self.canvas.Refresh()
+                self.engraving = True
+                self.btn_engrave.Enabled = False
+                self.btn_stop.Enabled = True
             except AMCError as e:
+                self.show_error("Failed to start engraving: %s" % str(e))
+                controller.zero()
+
+        def pre_engrave(self, index):
+            """ pre_engrave runs as a wx event to paint the current drawing section """
+            if index < len(self.commands) and self.engraving:
+                command = self.commands[index]
+                dc = wx.ClientDC(self.canvas)
+                self.preview_renderer.render(command, dc, "GREEN")
+                self.canvas.Update()
+                wx.CallLater(1, self.do_engrave, index)
+            else:
+                self.controller.zero()
+                self.engraving = False
+                self.btn_engrave.Enabled = True
+                self.btn_stop.Enabled = False
+
+        def do_engrave(self, index):
+            """ do_engrave is the step that actuall runs the engraver (blocks the wx event queue) """
+            try:
+                command = self.commands[index]
+                dc = wx.ClientDC(self.canvas)
+                self.engrave_renderer.render(command)
+                self.done_renderer.render(command, dc)
+                self.canvas.Update()
+                wx.CallLater(1,self.pre_engrave, index+1)
+            except AMCError as e:
+                self.show_error("Error while engraving: %s" % str(e))
+                controller.zero()
+
+
+        def on_stop(self, index):
+            if not self.engraving:
+                return
+            self.engraving = False
+
+
+        def show_error(self, msg):
                 dlg = wx.MessageDialog( 
                     self, 
-                    str(e), 
+                    msg,
                     "AMC2500", 
                     wx.OK
                     )                    
-                dlg.ShowModal() # Show it
-                dlg.Destroy() # finally destroy it when finished.
-                controller.zero()
+                dlg.ShowModal()
+                dlg.Destroy()
 
 
 def main():

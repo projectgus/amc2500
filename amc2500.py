@@ -427,6 +427,7 @@ class FakeSerial:
 
     def readline(self):
         if len(self.buffer) > 0:
+            time.sleep(0.001)
             return self.buffer.pop(0)
         else:
             raise serial.SerialException("Called readline on an empty buffer!")
@@ -458,7 +459,8 @@ class AMCRenderer:
 
     @when(BaseCommand, allow_cascaded_calls=True)
     def render(self, cmd):
-        print "Comment %s" % cmd.comment
+        if len(cmd.comment) > 0:
+            print "Comment: %s" % cmd.comment
 
     @when(LinearCommand)
     def render(self, cmd):
