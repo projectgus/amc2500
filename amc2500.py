@@ -241,6 +241,11 @@ class AMC2500:
                                       self._units_to_steps(dy)), 180)
     
     def arc_by(self, dx, dy, i, j, cw):
+        """
+        Move by (dx,dy) units arcing around the circle centered at (i,j), Clockwise if CW else Counter Clockwise
+
+        If successful, returns the actual number of units moved as a tuple (dx,dy)
+        """
         dx_s = self._units_to_steps(dx)
         dy_s = self._units_to_steps(dy)
 
@@ -261,8 +266,9 @@ class AMC2500:
         if( arc_s < 0 if cw else arc_s > 0 ):
             arc_s *= -1
 
-        self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
+        return self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
             dx_s, dy_s, arc_s),180)
+
     """
     Move the axis to an absolute position x,y based on currently known position
     """
