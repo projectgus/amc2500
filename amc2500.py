@@ -101,16 +101,17 @@ class AMC2500:
         return units * self.steps_per_unit
 
     
-    """ Get the current (estimated) absolute position of the head
-        in the currently set unit
-    """
     def get_pos(self):
+        """ Get the current (estimated) absolute position of the head
+        in the currently set unit
+        """
         return self._steps_to_units(self.pos)
 
-    """ Set head speed (units/second for the currently set unit)
-
+    def set_speed(self, speed):    
+        """ Set head speed (units/second for the currently set unit)
+        
         Two unknown commands here - VSxxx & ATxx
-
+        
         VM is definitely head speed, steps/second. Seems to apply whether motor is on
         or off, head up or down. Others maybe acceleration? Apply in some other cases??
 
@@ -127,8 +128,7 @@ class AMC2500:
         When testing "depth of cut"
         VM6
         AT-7
-    """
-    def set_speed(self, speed):    
+        """
         steps_per_second = int(self._units_to_steps(speed))
         if steps_per_second == self.cur_step_speed:
             return
@@ -137,13 +137,13 @@ class AMC2500:
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else 10)) ## ??
 
-    """
-    Set the spindle speed in rpm
-
-    This one is internally a bit confusing, the jog dialog gives 1000rpm=0, 5000rpm=99
-    but the other UI says up to 24000rpm so maybe you can go above 99
-    """
     def set_spindle_speed(self, rpm):
+        """
+        Set the spindle speed in rpm
+        
+        This one is internally a bit confusing, the jog dialog gives 1000rpm=0, 5000rpm=99
+        but the other UI says up to 24000rpm so maybe you can go above 99
+        """
         if rpm > MAX_RPM:
             rpm = MAX_RPM
         if rpm < MIN_RPM:
@@ -154,77 +154,77 @@ class AMC2500:
         ss = 100.0 * (rpm - MIN_RPM)/(MAX_RPM - MIN_RPM)
         self._write("SS%d" % round(ss))
 
-    """
-    Move the spindle head up/down as per the is_down parameter
-
-    Returns tuple of dx,dy coords but they should always be zero??
-
-    How up/down exact positions are determined is not yet known!
-    """
     def set_head_down(self, is_down):
+        """
+        Move the spindle head up/down as per the is_down parameter
+        
+        Returns tuple of dx,dy coords but they should always be zero??
+        
+        How up/down exact positions are determined is not yet known!
+        """
         if is_down == self.head_down:
             return
         res = self._write_pos("HD" if is_down else "HU", SHORT_TIMEOUT)
         self.head_down = is_down
         return res
 
-    """
-    Turn the spindle motor on/off as per the spindle_on paramether
-    """
     def set_spindle(self, spindle_on):
+        """
+        Turn the spindle motor on/off as per the spindle_on paramether
+        """        
         if spindle_on == self.spindle:
             return
         self.spindle = spindle_on
         self._write("MO%d" % ( 1 if spindle_on else 0 ))
 
-    """
-    Start jogging the spindle head in either or both x & y directions
-    
-    x & y can be positive, negative or zero but actual value is ignored.
-
-    You need to follow this command with a stop_jog command
-    """
     def jog(self, x, y, jog_speed=1000):
-      if( x != 0 and y != 0 ):
-        self._error("You can't jog two axes at once")
-
-      def jog_dir(a):
-        return "0" if a == 0 else "+" if a > 0 else "-"
-
-      if self.limits[0] != 0 and (x * self.limits[0] < 0) :
-          self.limits = (0, self.limits[1])
-      if self.limits[1] != 0 and (y * self.limits[1] < 0) :
-          self.limits = (self.limits[0], 0)
-
-      if x != 0:
-        self._write("VJ%d" % jog_speed)
-        self._write("JAX%s" % jog_dir(x))
-      if y != 0:
-        self._write("VJ%d" % jog_speed)
-        self._write("JAY%s" % jog_dir(y))
-     
-      self.jogging = True
+        """
+        Start jogging the spindle head in either or both x & y directions
         
-    """
-    Stop jogging and update the internal position of the motor
+        x & y can be positive, negative or zero but actual value is ignored.
+        
+        You need to follow this command with a stop_jog command
+        """
+        if( x != 0 and y != 0 ):
+            self._error("You can't jog two axes at once")
 
-    This should always be the next command called after .jog()
+        def jog_dir(a):
+            return "0" if a == 0 else "+" if a > 0 else "-"
+            
+        if self.limits[0] != 0 and (x * self.limits[0] < 0) :
+            self.limits = (0, self.limits[1])
+        if self.limits[1] != 0 and (y * self.limits[1] < 0) :
+            self.limits = (self.limits[0], 0)
 
-    Returns a tuple of (dx, dy) in units jogged by if no error has occured
-    """
+        if x != 0:
+            self._write("VJ%d" % jog_speed)
+            self._write("JAX%s" % jog_dir(x))
+        if y != 0:
+            self._write("VJ%d" % jog_speed)
+            self._write("JAY%s" % jog_dir(y))
+     
+        self.jogging = True
+        
     def stop_jog(self):
+        """
+        Stop jogging and update the internal position of the motor
+        
+        This should always be the next command called after .jog()
+        
+        Returns a tuple of (dx, dy) in units jogged by if no error has occured
+        """
         if not self.jogging:
             self._error("Not jogging, stop makes no sense")
         self.jogging = False
         self._write_pos("JAX0", SHORT_TIMEOUT)
         self._write_pos("JAY0", SHORT_TIMEOUT)
     
-    """
-    Move the axis by a certain number of units dx & dy
-
-    If successful, returns the actual number of units moved as a tuple (dx,dy)
-    """
     def move_by(self, dx, dy):
+        """
+        Move the axis by a certain number of units dx & dy
+
+        If successful, returns the actual number of units moved as a tuple (dx,dy)
+        """
         if self.limits[0] != 0 and (dx * self.limits[0] < 0) :
             self.limits = (0, self.limits[1])
         if self.limits[1] != 0 and (dy * self.limits[1] < 0) :
@@ -239,27 +239,29 @@ class AMC2500:
         return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dx), 
                                       self._units_to_steps(dy)), 180)
     
-    """
-    Move the axis to an absolute position x,y based on currently known position
-    """
     def move_to(self, x, y):
+        """
+        Move the axis to an absolute position x,y based on currently known position
+        """
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
         (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
         return self.move_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s))
 
-    """
-    Find the zero position (X- & Y-) and zero the known coordinates on that point
-    """
     def zero(self):
+        """
+        Find the zero position (X- & Y-) and zero the known coordinates on that point
+        """
         return self.find_corner(-1, -1, True)
 
-    """
-    Find a corner based on limits (+1 or -1 for lx & ly) and optionally
-    zero the current position on it
-
-    Works by stepping quickly to the limit, backing off slowly, then moving in slowly to the limit again
-    """
     def find_corner(self, lx, ly, zero_there=False):
+        """
+        Find a corner based on limits (+1 or -1 for lx & ly) and optionally
+        zero the current position on it
+        
+        Works by stepping quickly to the limit, backing off slowly, then moving in slowly 
+        to the limit again
+        """
+
         self.set_head_down(False)
         self.set_spindle(False)
         old_speed=self._steps_to_units(self.cur_step_speed)
@@ -288,9 +290,8 @@ class AMC2500:
         if zero_there:
             self.zero_here()
 
-    """    Zero the head on the current coordinates without moving it
-    """
     def zero_here(self):
+        """Zero the head on the current coordinates without moving it"""
         self._debug("Zeroing here (was %d,%d steps)" % self.pos)
         self.pos = (0,0)
 
@@ -330,15 +331,12 @@ class AMC2500:
             ser.timeout = t
             return rsp
 
-    
-        
-
-    """ Write something which will moves the head and result in an OKdx,dy,dz
-    message or possibly a limit switch message.
-
-    Return the dx,dy moved as a tuple (in units)
-    """
     def _write_pos(self, cmd, response_timeout_s):
+        """ Write something which will moves the head and result in an OKdx,dy,dz
+        message or possibly a limit switch message.
+        
+        Return the dx,dy moved as a tuple (in units)
+        """
         rsp = self._write(cmd, response_timeout_s)
         dpos = (0,0)
         for l in rsp:            
@@ -360,13 +358,12 @@ class AMC2500:
         return (self._steps_to_units(dpos[0]), self._steps_to_units(dpos[1]))
 
 
-"""
-A simulated AMC2500 controller for testing.
-
-Simulated at the serial port level, with a test stub serial port
-"""
 class SimController(AMC2500):
+    """
+    A simulated AMC2500 controller for testing.
 
+    Simulated at the serial port level, with a test stub serial port
+    """
     def __init__(self, 
                  port='/dev/ttyUSB0',
                  debug=True,
@@ -376,8 +373,8 @@ class SimController(AMC2500):
     def _get_serial(self, port):
         return FakeSerial()
 
-# A fake serial port, like serial() but fakes its responses
 class FakeSerial:
+    """ A fake AMC2500 serial port, like serial() but fakes its responses """
     def __init__(self, *args):
         self.x = 0
         self.y = 0 # track our own position
