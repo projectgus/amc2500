@@ -16,6 +16,7 @@ import sys, wx
 from amc2500 import *
 from gcode import *
 from visitor import is_visitor, when
+from threading import Thread
 
 # dimension in mm, total area the head can cover (limit to limit)
 # and the area inside that which corresponds to the bed
@@ -94,6 +95,65 @@ class DCRenderer:
         self.spindle = False
 
 
+EVT_ENGRAVING_DONE_ID = wx.NewId()
+EVT_ENGRAVING_CMD_START_ID = wx.NewId()
+EVT_ENGRAVING_CMD_END_ID = wx.NewId()
+
+class EngravingDoneEvent(wx.PyEvent):
+     """Event to signify that engraving is done"""
+     def __init__(self, error=None):
+         wx.PyEvent.__init__(self)
+         self.SetEventType(EVT_ENGRAVING_DONE_ID)
+         self.error=error
+
+class EngravingCmdStart(wx.PyEvent):
+     """Event to signify that engraving is starting a command"""
+     def __init__(self, index):
+         wx.PyEvent.__init__(self)
+         self.SetEventType(EVT_ENGRAVING_CMD_START_ID)
+         self.index=index
+
+class EngravingCmdEnd(wx.PyEvent):
+     """Event to signify that engraving has just finished a command"""
+     def __init__(self, index):
+         wx.PyEvent.__init__(self)
+         self.SetEventType(EVT_ENGRAVING_CMD_END_ID)
+         self.index=index
+ 
+class WorkerThread(Thread):
+    """Worker Thread for running the engraver."""
+    def __init__(self, window, renderer):
+        Thread.__init__(self)
+        self._window=window
+        self._renderer=renderer
+        self._aborting=False
+        self.start()
+        
+    def run(self):
+        controller=self._window.controller
+        commands=self._window.commands
+        try:             
+            controller.zero()
+            controller.set_units_mm()
+            controller.set_spindle_speed(5000)
+            
+            for i in range(0, len(commands)):
+                if self._aborting:
+                    wx.PostEvent(self._window, EngravingDoneEvent(None))
+                    return
+                
+                wx.PostEvent(self._window, EngravingCmdStart(i))
+                self._renderer.render(commands[i])
+                wx.PostEvent(self._window, EngravingCmdEnd(i))
+            wx.PostEvent(self._window, EngravingDoneEvent(None))
+        except Exception as e:
+            wx.PostEvent(self._window, EngravingDoneEvent(e))
+            controller.zero()
+ 
+    def abort(self):
+        self._aborting = True
+
+
 class PreviewFrame(wx.Frame):
         def __init__(self, commands):
             wx.Frame.__init__( self,
@@ -117,6 +177,10 @@ class PreviewFrame(wx.Frame):
 
             self.chk_simulation = wx.CheckBox(self, label="Simulation Mode")
             self.chk_simulation.Value = True
+            
+            self.Connect(-1, -1, EVT_ENGRAVING_DONE_ID, self.on_engraving_done)
+            self.Connect(-1, -1, EVT_ENGRAVING_CMD_END_ID, self.on_engrave_cmd_end)
+            self.Connect(-1, -1, EVT_ENGRAVING_CMD_START_ID, self.on_engrave_cmd_start)
 
             # layout
             sizer = wx.BoxSizer( wx.VERTICAL )
@@ -160,53 +224,36 @@ class PreviewFrame(wx.Frame):
                     self.controller = SimController()
                 else:
                     self.controller = AMC2500()                           
-                self.controller.zero()
-                self.controller.set_units_mm()
-                self.controller.set_spindle_speed(5000)
             
                 self.done_renderer = DCRenderer(down_colour="BLACK")
-                self.engrave_renderer = AMCRenderer(self.controller)
-                wx.CallAfter(self.pre_engrave, 0) # need to pump the wx event loop as we engrave
                 self.do_repaint = True
                 self.canvas.Refresh()
                 self.engraving = True
                 self.btn_engrave.Enabled = False
                 self.btn_stop.Enabled = True
+                self.worker = WorkerThread(self, AMCRenderer(self.controller))
             except AMCError as e:
                 self.show_error("Failed to start engraving: %s" % str(e))
                 self.controller.zero()
 
-        def pre_engrave(self, index):
-            """ pre_engrave runs as a wx event to paint the current drawing section """
-            if index < len(self.commands) and self.engraving:
-                command = self.commands[index]
+        def on_engrave_cmd_start(self, event):
+                command = self.commands[event.index]
                 dc = wx.ClientDC(self.canvas)
                 self.preview_renderer.render(command, dc, "GREEN")
                 self.canvas.Update()
-                wx.CallLater(1, self.do_engrave, index)
-            else:
-                self.controller.zero()
-                self.engraving = False
-                self.btn_engrave.Enabled = True
-                self.btn_stop.Enabled = False
 
-        def do_engrave(self, index):
-            """ do_engrave is the step that actuall runs the engraver (blocks the wx event queue) """
-            try:
-                command = self.commands[index]
+        def on_engrave_cmd_end(self, event):
+                command = self.commands[event.index]
                 dc = wx.ClientDC(self.canvas)
-                self.engrave_renderer.render(command)
                 self.done_renderer.render(command, dc)
-                self.canvas.Update()
-                wx.CallLater(1,self.pre_engrave, index+1)
-            except AMCError as e:
-                self.show_error("Error while engraving: %s" % str(e))
-                self.engraving = False
-                self.do_repaint = True
-                wx.CallAfter(self.pre_engrave, index+1)
-                
 
-
+        def on_engraving_done(self, event):
+            if event.error is not None:
+                self.show_error(event.error)
+            self.engraving = False
+            self.btn_engrave.Enabled = True
+            self.btn_stop.Enabled = False
+                                         
         def on_stop(self, index):
             if not self.engraving:
                 return
@@ -216,7 +263,7 @@ class PreviewFrame(wx.Frame):
         def show_error(self, msg):
                 dlg = wx.MessageDialog( 
                     self, 
-                    msg,
+                    str(msg),
                     "AMC2500", 
                     wx.OK
                     )                    
