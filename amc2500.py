@@ -18,6 +18,7 @@
 #   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 import datetime, re, time
 import serial
+import math
 
 STEPS_PER_MM=(1/0.006350)
 MAX_RPM=5000
@@ -210,6 +211,29 @@ class AMC2500:
         return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dx), 
                                       self._units_to_steps(dy)), 180)
     
+    def arc_by(self, dx, dy, i, j, cw):
+        dx_s = self._units_to_steps(dx)
+        dy_s = self._units_to_steps(dy)
+
+        i_s = self._units_to_steps(i)
+        j_s = self._units_to_steps(j)
+
+        if(int(dx_s) == 0 and int(dy_s) == 0):
+            return # sending 0,0 breaks the controller
+
+        if(int(i_s) == 0 and int(j_s) == 0):
+            return # sending 0,0 is likely to break the controller
+
+        if(int(i_s) == int(dx_s) and int(j_s) == int(dy_s)):
+            return # sending (i,j) == (dx,dy) is likely to break the controller
+
+        arc_s = 32770*(math.atan2(-j_s,-i_s) - math.atan2(dy_s-j_s,dx_s-i_s))
+
+        if( arc_s < 0 if cw else arc_s > 0 ):
+            arc_s *= -1
+
+        self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
+            dx_s, dy_s, arc_s),180)
     """
     Move the axis to an absolute position x,y based on currently known position
     """
