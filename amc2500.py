@@ -469,7 +469,7 @@ class AMCRenderer:
         self.controller.move_to(cmd.to_x, cmd.to_y)
         self.home = self.home and self.controller.limits == (-1,-1) # still on home?
         if self.controller.limits != (0,0) and not self.home:
-            raise AMCError("Hit limits %s. Engraving should stop now." % (controller.limits))
+            raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
 
         
     @when(M3)

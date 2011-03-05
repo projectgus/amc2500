@@ -174,7 +174,7 @@ class PreviewFrame(wx.Frame):
                 self.btn_stop.Enabled = True
             except AMCError as e:
                 self.show_error("Failed to start engraving: %s" % str(e))
-                controller.zero()
+                self.controller.zero()
 
         def pre_engrave(self, index):
             """ pre_engrave runs as a wx event to paint the current drawing section """
@@ -201,7 +201,10 @@ class PreviewFrame(wx.Frame):
                 wx.CallLater(1,self.pre_engrave, index+1)
             except AMCError as e:
                 self.show_error("Error while engraving: %s" % str(e))
-                controller.zero()
+                self.engraving = False
+                self.do_repaint = True
+                wx.CallAfter(self.pre_engrave, index+1)
+                
 
 
         def on_stop(self, index):
