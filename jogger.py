@@ -272,28 +272,28 @@ class MainFrame(wx.Frame):
 
   def OnHeadUp(self,e):
     if(self.controller):
-      self.controller.head_down(False)
+      self.controller.set_head_down(False)
       self.UpdateStatus()
     else:
       e.Skip()
 
   def OnHeadDown(self,e):
     if(self.controller):
-      self.controller.head_down(True)
+      self.controller.set_head_down(True)
       self.UpdateStatus()
     else:
       e.Skip()
 
   def OnSpindleOn(self,e):
     if(self.controller):
-      self.controller.spindle(True)
+      self.controller.set_spindle(True)
       self.UpdateStatus()
     else:
       e.Skip()
 
   def OnSpindleOff(self,e):
     if(self.controller):
-      self.controller.spindle(False)
+      self.controller.set_spindle(False)
       self.UpdateStatus()
     else:
       e.Skip()

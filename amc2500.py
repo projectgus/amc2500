@@ -66,12 +66,16 @@ class AMC2500:
         self.pos = (0,0)  # pos is always stored internally in steps
         self.limits = (0,0)
         self.jogging = False
+        self.cur_step_speed = None # in steps/sec
+        self.head_down = False # head down flag
+        self.spindle = False # spindle on flag
+        self.cur_spindle_speed = -1 # in RPM        
         self.set_units_steps()
         self._debug("Initialising controller on %s..." % port)
-        self._write("IM", SHORT_TIMEOUT)
+        self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
         self._write("EO0", SHORT_TIMEOUT)
         self.set_speed(4000)
-    
+
 
     def _get_serial(self, port):
         return serial.Serial(port=port, baudrate=9600)
@@ -125,8 +129,10 @@ class AMC2500:
         AT-7
     """
     def set_speed(self, speed):    
-        self.speed = speed
         steps_per_second = int(self._units_to_steps(speed))
+        if steps_per_second == self.cur_step_speed:
+            return
+        self.cur_step_speed = steps_per_second
         self._write("VS%d" % (steps_per_second / 4)) ## ???                
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else 10)) ## ??
@@ -142,6 +148,9 @@ class AMC2500:
             rpm = MAX_RPM
         if rpm < MIN_RPM:
             rpm = MIN_RPM
+        if self.cur_spindle_speed == rpm:
+            return
+        self.cur_spindle_speed = rpm
         ss = 100.0 * (rpm - MIN_RPM)/(MAX_RPM - MIN_RPM)
         self._write("SS%d" % round(ss))
 
@@ -152,13 +161,20 @@ class AMC2500:
 
     How up/down exact positions are determined is not yet known!
     """
-    def head_down(self, is_down):
-        return self._write_pos("HD" if is_down else "HU", SHORT_TIMEOUT)
+    def set_head_down(self, is_down):
+        if is_down == self.head_down:
+            return
+        res = self._write_pos("HD" if is_down else "HU", SHORT_TIMEOUT)
+        self.head_down = is_down
+        return res
 
     """
     Turn the spindle motor on/off as per the spindle_on paramether
     """
-    def spindle(self, spindle_on):
+    def set_spindle(self, spindle_on):
+        if spindle_on == self.spindle:
+            return
+        self.spindle = spindle_on
         self._write("MO%d" % ( 1 if spindle_on else 0 ))
 
     """
@@ -244,9 +260,9 @@ class AMC2500:
     Works by stepping quickly to the limit, backing off slowly, then moving in slowly to the limit again
     """
     def find_corner(self, lx, ly, zero_there=False):
-        self.head_down(False)
-        self.spindle(False)
-        old_speed=self.speed
+        self.set_head_down(False)
+        self.set_spindle(False)
+        old_speed=self._steps_to_units(self.cur_step_speed)
         fast=self._steps_to_units(8000)
         slow=self._steps_to_units(250)
         big=self._steps_to_units(80000)
@@ -449,7 +465,7 @@ class AMCRenderer:
 
     @when(LinearCommand)
     def render(self, cmd):
-        self.controller.head_down(cmd.to_z <= 0 and not self.keep_head_up)
+        self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
         self.controller.set_speed(cmd.f / 60)
         self.controller.move_to(cmd.to_x, cmd.to_y)
         self.home = self.home and self.controller.limits == (-1,-1) # still on home?
@@ -459,10 +475,10 @@ class AMCRenderer:
         
     @when(M3)
     def render(self, cmd):
-        self.controller.spindle(not self.keep_spindle_off)
+        self.controller.set_spindle(not self.keep_spindle_off)
     @when(M5)
     def render(self, cmd):
-        self.controller.spindle(False)
+        self.controller.set_spindle(False)
 
 
 
