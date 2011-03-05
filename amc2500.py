@@ -269,9 +269,6 @@ class AMC2500:
         return self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
             dx_s, dy_s, arc_s),180)
 
-    """
-    Move the axis to an absolute position x,y based on currently known position
-    """
     def move_to(self, x, y):
         """
         Move the axis to an absolute position x,y based on currently known position
