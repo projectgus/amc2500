@@ -146,7 +146,7 @@ class WorkerThread(Thread):
                 self._renderer.render(commands[i])
                 wx.PostEvent(self._window, EngravingCmdEnd(i))
             wx.PostEvent(self._window, EngravingDoneEvent(None))
-        except Error as e:
+        except Exception as e:
             wx.PostEvent(self._window, EngravingDoneEvent(e))
             controller.zero()
  
@@ -263,7 +263,7 @@ class PreviewFrame(wx.Frame):
         def show_error(self, msg):
                 dlg = wx.MessageDialog( 
                     self, 
-                    msg,
+                    str(msg),
                     "AMC2500", 
                     wx.OK
                     )                    
