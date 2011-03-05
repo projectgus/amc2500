@@ -11,22 +11,118 @@ AMC2500 CNC controller.
 from pyparsing import *
 import sys
 
-"""
-Evaluate a gcode file, including evaluating variable/parameter values to their final values,
-and return a list of "command objects" that can then be used for actions.
 
-command_classes is a dict of supported command names mapping to the classes that are instantiated, ie
-{ "G00" : CmdG00,  "G01" : CmdG01,   etc. }    
+# Command classes for the gcode object model
 
-Each class needs to take a constructor of the form (args, comments) where args is a dict of supplied arguments (values evaluated to floats) and comments is a list of comment strings attached to the command (normally only one.)
+class BaseCommand(object):
+    def __init__(self, last_args, args, comments):
+        self.comment = " ".join(comments) if isinstance(comments, list) else comments
+    
 
-The function returns a list of these instantiated objects, or throws an error if a parse problem occurs.
-"""
-def parse(command_classes, filename):    
+class Comment(BaseCommand):
+    def __init__(self, last_args, args, comments):
+        BaseCommand.__init__(self, last_args, args,comments)
+    def __repr__(self):
+        return "Comment %s" % self.comment
+
+class LinearCommand(BaseCommand):
+    def __init__(self, last_args, args, comments):
+        BaseCommand.__init__(self, last_args, args, comments)
+        self.fr_x = last_args["X"]
+        self.fr_y = last_args["Y"]
+        self.fr_z = last_args["Z"]
+        self.to_x = args.get("X", self.fr_x)
+        self.to_y = args.get("Y", self.fr_y)
+        self.to_z = args.get("Z", self.fr_z)
+        self.f    = args.get("F", last_args["F"])
+    def __repr__(self):
+        return "%s (%s,%s,%s) -> (%s,%s,%s) F=%s (%s)"  % ( self.__class__.__name__, 
+                                                            self.fr_x, self.fr_y, self.fr_z,    
+                                                            self.to_x, self.to_y, self.to_z,
+                                                            self.f, self.comment )
+
+class G00(LinearCommand):
+    """ G00 - high speed move (slew) """
+    def __init__(self, last_args, args, comments):
+        LinearCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return LinearCommand.__repr__(self)
+
+
+class G01(LinearCommand):
+    """ G01 - linear move (machine)"""
+    def __init__(self, last_args, args, comments):
+        LinearCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return LinearCommand.__repr__(self)
+        
+class G02(LinearCommand):
+    """ G02 - CW 2D circular move (using IJ params)
+    Currently implemented as a linear move!
+    """
+    def __init__(self, last_args, args, comments):
+        LinearCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return LinearCommand.__repr__(self)
+
+class G03(LinearCommand):
+    """ G03 - CCW 2D circular move (using IJ params)
+    Currently implemented as a linear move!
+    """
+    def __init__(self, last_args, args, comments):
+        LinearCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return LinearCommand.__repr__(self)
+
+class G21(BaseCommand):
+    """ G21 - set mm mode. this is all we support atm anyhow ;) """
+    def __init__(self, last_args, args, comments):        
+        BaseCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return "G21"
+
+class M2(BaseCommand):
+    """ M2 - end of program """
+    def __init__(self, last_args, args, comments):        
+        BaseCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return "M2"
+
+class M3(BaseCommand):
+    """ M3 - spindle on"""
+    def __init__(self, last_args, args, comments):        
+        BaseCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return "M3"
+
+class M5(BaseCommand):
+    """ M5 - spindle off"""
+    def __init__(self, last_args, args, comments):        
+        BaseCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return "M5"
+
+
+def parse(filename):    
+    """
+    Evaluate a gcode file, including evaluating variable/parameter values to their final values,
+    and return a list of "command objects" that can then be used for actions..
+    """
+    command_classes = {
+                "Comment" : Comment,
+                "G00" : G00,
+                "G01" : G01,
+                "G02" : G02,
+                "G03" : G03,
+                "G21" : G21,
+                "M2"  : M2,
+                "M3"  : M3,
+                "M5"  : M5 }
     ast = script.parseString(open(filename).read()).asList()
-    for c in ast:
-        print c
     variables = { }    
+
+    # trace whatever last evaluated value for these arguments was
+    cur_args = { "X" : 0.0, "Y" : 0.0, "Z" : 0.0, "F" : 0.0 }
 
     def evaluate_expr(expr):
         if isinstance(expr, list) and len(expr) == 3 and expr[0] in opn: # expression
@@ -39,9 +135,9 @@ def parse(command_classes, filename):
         else:
             return expr    
 
-    def evaluate_command(command):        
+    def evaluate_command(command): 
         if command[0] == "Comment":
-            return command_classes["Comment"](command[1])
+            return command_classes["Comment"](cur_args, {}, command[1])
         if not isinstance(command[0],str):
             print "Misparsed command %s" % command
         elif command[0] in command_classes: # command
@@ -50,7 +146,10 @@ def parse(command_classes, filename):
             named_args = {}
             for a in args:
                 named_args[a[0]] = evaluate_expr(a[1])
-            return command_classes[command[0]](named_args, comments)
+            result = command_classes[command[0]](cur_args, named_args, comments)
+            cur_args.update(named_args)
+            return result
+        
         elif command[0].startswith("#"): # assignment
             variables[command[0]] = evaluate_expr(command[1])
         else:
