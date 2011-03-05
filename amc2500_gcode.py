@@ -13,7 +13,9 @@ Guidelines for gcode files:
 """
 
 import sys, wx
-import gcode, amc2500
+from amc2500 import *
+from gcode import *
+from visitor import is_visitor, when
 
 # dimension in mm, total area the head can cover (limit to limit)
 # and the area inside that which corresponds to the bed
@@ -40,226 +42,57 @@ def scale(d):
 
 
 def process(filename):    
-    command_classes = {
-        "Comment" : Comment,
-        "G00" : CmdG00,
-        "G01" : CmdG01,
-        "G02" : CmdG02,
-        "G03" : CmdG03,
-        "G21" : CmdG21,
-        "M2"  : CmdM2,
-        "M3"  : CmdM3,
-        "M5"  : CmdM5 }
     print "Parsing %s" % filename
-    commands = gcode.parse(command_classes, filename)
+    commands = parse(filename)
     print "Extracted %d commands" % len(commands)
     frame = PreviewFrame(commands)
 
+@is_visitor
+class DCRenderer:
+    """Renderer to take gcode commands and preview them onto a wxPython DC
+    
+       up_color - color to use when moving not engraving
+       down_color - color to use when engraving
+       error_color - color to use when head down but spindle off
+    """
 
-def line_pen(state):
-    color = { (False, True) :  "GREY",
-              (False, False) : "GREY",
-              (True, False) :  "DARKRED", # head down spindle off should not happen
-              (True, True) :  "BLACK",
-              }[(state.head_down, state.spindle_on)]
-    width = 2 if state.head_down else 1
-    return wx.Pen(color, width)
-                      
+    def __init__(self, up_color="GREY", down_color="BLACK", error_color="DARKRED"):
+        self.up_color = up_color
+        self.down_color = down_color
+        self.error_color = error_color
+        self.spindle = False
+        self.head = False
 
-# Command classes, this is where the magic happens #                
+    def get_color(self, override_color=None):
+        if override_color is not None:
+            return override_color        
+        elif self.spindle and self.head:
+            return self.down_color
+        elif self.head:
+            return self.error_color
+        else:
+            return self.up_color
 
-class Comment:
-    def __init__(self, comment):
-        self.comment = comment
-    def __repr__(self):
-        return "Comment %s" % self.comment
+    @when(BaseCommand, allow_cascaded_calls=True)
+    def render(self, cmd, dc, override_color=None):
+        print cmd.comment
 
-    def render_preview(self, state, dc):
-        print self
-        return state
-
-    def render_move(self, controller):
-        print self
-
-
-class CmdCommon:
-    def __init__(self, args, comments):
-        self.args = args
-        self.comments = comments
-
-    # update some common preview state
-    def render_preview(self, state, dc):
-        print self
-        if "Z" in self.args:
-            state.head_down = self.args["Z"] <= 0
-        dc.SetPen(line_pen(state))
-        return state
-
-    def render_preview_line(self, state, dc): # G00 & G01 have the same line in preview
-        state = CmdCommon.render_preview(self, state,dc)
-        if not ("X" in self.args or "Y" in self.args): # just a Z movement, common code does that
-            return state
-        x = self.args.get("X", state.x)
-        y = self.args.get("Y", state.y)
-        lines = [ scale([state.x, state.y, x, y]) ]
+    @when(LinearCommand, allow_cascaded_calls=True)
+    def render(self, cmd, dc, override_color=None):
+        self.head = cmd.to_z <= 0
+        dc.SetPen(wx.Pen(self.get_color(override_color), PREVIEW_SCALE))
+        if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
+            return # just a Z movement
+        lines = [ scale([cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y]) ]
         print "Line %s" % lines
         dc.DrawLineList(lines)
-        state.x = x
-        state.y = y
-        return state
         
-    def render_preview_arc(self, state, dc, cw):
-        state = CmdCommon.render_preview(self,state,dc)
-        # cheat for now and draw a three-part line !
-        x = self.args.get("X", state.x)
-        y = self.args.get("Y", state.y)
-        i = self.args.get("I", 0)+state.x
-        j = self.args.get("J", 0)+state.y
-        dc.DrawLine(scale(state.x), scale(state.y), scale(x), scale(y))
-        # if not cw:
-        #     dc.DrawArc(x, y, state.x, state.y, i, j)
-        # else:
-        #     dc.DrawArc(state.x, state.y, x, y, i, j)
-        state.x = x
-        state.y = y
-        return state
-
-    def render_line_common(self, controller):
-        if "F" in self.args:
-            f = self.args["F"] # mm/min
-            controller.set_speed(f/60)
-        if "Z" in self.args:
-            z = self.args["Z"]
-            controller.head_down(z <= 0)        
-            
-    def render_line_move(self, controller):
-        CmdCommon.render_line_common(self, controller)
-        x = self.args.get("X", controller.get_pos()[0])
-        y = self.args.get("Y", controller.get_pos()[1])
-        controller.move_to(x, y)
-
-
-""" G00 - high speed move (slew)
-"""
-class CmdG00(CmdCommon):
-    def __init__(self, args, comments):
-        CmdCommon.__init__(self, args, comments)
-
-    def __repr__(self):
-        return "G00 %s %s" % (self.args, self.comments)
-
-    def render_preview(self, state, dc):
-        return CmdCommon.render_preview_line(self, state,dc)
-
-    def render_move(self, controller):
-        CmdCommon.render_line_move(self, controller)        
-
-""" G01 - linear move (machine)
-"""
-class CmdG01(CmdCommon):
-    def __init__(self, args, comments):
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G01 %s %s" % (self.args, self.comments)
-
-    def render_preview(self, state, dc):
-        return CmdCommon.render_preview_line(self, state,dc)
-
-    def render_move(self, controller):
-        CmdCommon.render_line_move(self, controller)                
-        
-""" G02 - CW 2D circular move (using IJ params, K params make no sense here)
-"""
-class CmdG02(CmdCommon):
-    def __init__(self, args, comments):
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G02 %s %s" % (self.args, self.comments)
-
-    def render_preview(self, state, dc):
-        return CmdCommon.render_preview_arc(self, state, dc, True)
-
-    def render_move(self, controller):
-        CmdCommon.render_line_move(self, controller)        
-
-
-""" G03 - CCW 2D circular move (using IJ params, K params make no sense here)
-"""
-class CmdG03(CmdCommon):
-    def __init__(self, args, comments):        
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G03 %s %s" % (self.args, self.comments)
-
-    def render_preview(self, state, dc):
-        return CmdCommon.render_preview_arc(self,state,dc, False)
-
-    def render_move(self, controller):
-        CmdCommon.render_line_move(self, controller)        
-
-""" G21 - set mm mode. this is all we support atm anyhow ;)
-"""
-class CmdG21(CmdCommon):
-    def __init__(self, args, comments):        
-                CmdCommon.__init__(self, args, comments)
-    def __repr__(self):
-        return "G21 %s %s" % (self.args, self.comments)
-
-    def render_preview(self, state, dc):
-        return CmdCommon.render_preview(self,state,dc)
-
-    def render_move(self, controller):
-        controller.set_units_mm() # its not this simple if we're already running but
-        # it is OK for now
-
-
-""" M2 - end of program 
-"""
-class CmdM2:
-    def __init__(self, args, comments):        
-        pass
-        
-    def __repr__(self):
-        return "M2"
-
-    def render_preview(self, state, dc):
-        return state
-
-    def render_move(self, controller):
-        pass
-
-
-
-""" M3 - spindle on
-"""
-class CmdM3:
-    def __init__(self, args, comments):        
-        pass        
-    def __repr__(self):
-        return "M3"
-
-    def render_preview(self, state, dc):
-        state.spindle_on = True
-        return state
-
-    def render_move(self, controller):
-        controller.spindle(True)
-
-""" M5 - spindle off
-"""
-class CmdM5:
-    def __init__(self, args, comments):
-        pass    
-    def __repr__(self):
-        return "M5"
-
-    def render_preview(self, state, dc):
-        state.spindle_on = False
-        return state
-
-    def render_move(self, controller):
-        controller.spindle(False)
-
+    @when(M3)
+    def render(self, cmd, dc, override_color=None):
+        self.spindle = True
+    @when(M5)
+    def render(self, cmd, dc, override_color=None):
+        self.spindle = False
 
 
 class PreviewFrame(wx.Frame):
@@ -290,16 +123,11 @@ class PreviewFrame(wx.Frame):
                        
         def on_paint(self, event):
             dc = wx.PaintDC(event.GetEventObject())
+            renderer = DCRenderer()            
             self.clear(dc)
-            class State:
-                pass
-            state = State()
-            state.x = 0
-            state.y = 0
-            state.head_down = False
-            state.spindle_on = False
             for cmd in self.commands:
-                state = cmd.render_preview(state, dc)
+                renderer.render(cmd, dc, None)
+
             
         def clear(self, dc):
             dc.Clear()
@@ -308,30 +136,29 @@ class PreviewFrame(wx.Frame):
                               scale(BED_WIDTH), scale(BED_HEIGHT))
 
         def on_print(self, event):
-            controller = amc2500.SimController() if self.chk_simulation.Value else amc2500.AMC2500()
-            controller.zero()
-            controller.set_units_mm()
-            controller.set_spindle_speed(5000)
-            #controller.move_to(100,1)
-            #controller.zero_here()
-            home = True
-            for comm in self.commands:
-                print comm
-                comm.render_move(controller)              
-                home = home and controller.limits == (-1,-1) # still on home?
-                if controller.limits != (0,0) and not home:
-                    dlg = wx.MessageDialog( 
-                        self, 
-                        "Hit limits %s! Engraving will stop now :(" % (controller.limits,), 
-                        "AMC2500", 
-                        wx.OK
-                        )                    
-                    dlg.ShowModal() # Show it
-                    dlg.Destroy() # finally destroy it when finished.
-                    controller.zero()
-                    break
+            try:
+                if self.chk_simulation.Value:
+                    controller = SimController()
+                else:
+                    controller = AMC2500()                           
+                controller.zero()
+                controller.set_units_mm()
+                controller.set_spindle_speed(5000)
+            
+                renderer = AMCRenderer(controller)
+                for comm in self.commands:
+                    renderer.render(comm)
 
-
+            except AMCError as e:
+                dlg = wx.MessageDialog( 
+                    self, 
+                    str(e), 
+                    "AMC2500", 
+                    wx.OK
+                    )                    
+                dlg.ShowModal() # Show it
+                dlg.Destroy() # finally destroy it when finished.
+                controller.zero()
 
 
 def main():

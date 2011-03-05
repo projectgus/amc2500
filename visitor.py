@@ -37,21 +37,24 @@ pattern will optionally call first the superclass and then the subclass. The res
 Example:
 
 class Superclass:
-    pass
+    def __init__(self):
+        pass
 class SubA(Superclass):
-    pass
+    def __init__(self):
+        pass
 class SubB(Superclass):
-    pass
+    def __init__(self):
+        pass
 
 @is_visitor
 class MyVisitor:
     @when(Superclass, allow_cascaded_calls=True)
-    def foo(s):
+    def foo(self, s):
         print "I am a superclass call"
         return 1
 
     @when(SubA)
-    def foo(a):
+    def foo(self, a):
         print "I am a subclass A call"
         return 2
 
@@ -193,32 +196,4 @@ def is_visitor(cls):
     global _methods
     _methods = {}
     return cls
-
-
-
-class Superclass:
-    def __init__(self):
-        pass
-class SubA(Superclass):
-    def __init__(self):
-        pass
-class SubB(Superclass):
-    def __init__(self):
-        pass
-
-@is_visitor
-class MyVisitor:
-    @when(Superclass, allow_cascaded_calls=True)
-    def foo(self, s):
-        print "I am a superclass call"
-        return 1
-
-    @when(SubA)
-    def foo(self, a):
-        print "I am a subclass A call"
-        return 2
-
-v=MyVisitor()
-a=SubA()
-b=SubB()
 

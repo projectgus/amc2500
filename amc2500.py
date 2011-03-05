@@ -18,6 +18,8 @@
 #   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 import datetime, re, time
 import serial
+from visitor import is_visitor, when
+from gcode import *
 
 STEPS_PER_MM=(1/0.006350)
 MAX_RPM=5000
@@ -27,6 +29,12 @@ MOVEABLE_WIDTH = (300 * STEPS_PER_MM) # rough, TODO: measure properly and update
 MOVEABLE_HEIGHT=MOVEABLE_WIDTH
 
 SHORT_TIMEOUT=0.5
+
+
+class AMCError(EnvironmentError):
+    """ Exception for anything that goes wrong from the controller"""
+    def __init__(self, error):
+        EnvironmentError.__init__(self, (-1, error))
 
 """
 Class to remote control an AMC2500 w/ a Quick Circuit 5000 attached.
@@ -418,6 +426,44 @@ class FakeSerial:
 
     def inWaiting(self):
         return len("\n".join(self.buffer))
+
+
+@is_visitor
+class AMCRenderer:
+    """A renderer to take gcode commands (via gcode module) and send them to the controller
+    """
+    def __init__(self, controller, keep_spindle_off=False, keep_head_up=False):
+        """ Create a new renderer.
+        controller - controller instance to use
+        keep_spindle_off  - set to true to keep the spindle from running
+        keep_head_up      - set to true to keep the head up
+        """
+        self.controller = controller
+        self.keep_spindle_off = keep_spindle_off
+        self.keep_head_up = keep_head_up
+        self.home = True # assumed
+
+    @when(BaseCommand, allow_cascaded_calls=True)
+    def render(self, cmd):
+        print "Comment %s" % cmd.comment
+
+    @when(LinearCommand)
+    def render(self, cmd):
+        self.controller.head_down(cmd.to_z <= 0 and not self.keep_head_up)
+        self.controller.set_speed(cmd.f / 60)
+        self.controller.move_to(cmd.to_x, cmd.to_y)
+        self.home = self.home and self.controller.limits == (-1,-1) # still on home?
+        if self.controller.limits != (0,0) and not self.home:
+            raise AMCError("Hit limits %s. Engraving should stop now." % (controller.limits))
+
+        
+    @when(M3)
+    def render(self, cmd):
+        self.controller.spindle(not self.keep_spindle_off)
+    @when(M5)
+    def render(self, cmd):
+        self.controller.spindle(False)
+
 
 
 _RE_AXES=r"(?P<x>[-\d]+),(?P<y>[-\d]+),(?P<z>[-\d]+)"
