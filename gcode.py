@@ -1,16 +1,17 @@
 """
-A simple incomplete Python g-code parser module using pyparsing
+A simple incomplete Python g-code parser module
+
+Originally implemented using pyparsing, this was clean but v. slow so now implemented
+less cleanly using regexes, string munging and python eval (ewww, I know!)
 
 At this point it is intended to support the subset of g-code dumped by the Inkscape
 gcodetools plugin. http://www.cnc-club.ru/forum/viewtopic.php?f=15&t=35&start=0
 
-It doesn't do much by itself, see also amc2500_gcode.py for an implementation to work with the
+It doesn't do much by itself, see gcode_ui.py for a gcode GUI to work with the
 AMC2500 CNC controller.
 """
 
-from pyparsing import *
-import sys, math
-
+import sys, math, re
 
 # Command classes for the gcode object model
 
@@ -112,8 +113,19 @@ class M5(BaseCommand):
 
 def parse(filename):    
     """
-    Evaluate a gcode file, including evaluating variable/parameter values to their final values,
-    and return a list of "command objects" that can then be used for actions..
+    Evaluate a gcode file, including evaluating variable/parameter
+    values to their final values, and return a list of "command
+    objects" that can then be used for actions..
+
+    Parsing & intrepeting technique is a bit rough. First regexes pull
+    out the major form of each line, then an evaluate pass checks all the
+    values and does variable assignment, etc.  Expressions are evaluated
+    by converting them to Python (variables names like #11 are converted
+    to Python-safe names like V11) and then using eval().
+
+    This hacky pile of techniques will not scale to much more
+    complexity, so if more complexity is needed we should find a
+    parser framework like pyparsing but with better performance.
     """
     command_classes = {
                 "Comment" : Comment,
@@ -125,100 +137,93 @@ def parse(filename):
                 "M2"  : M2,
                 "M3"  : M3,
                 "M5"  : M5 }
-    ast = script.parseString(open(filename).read()).asList()
-    variables = { }    
+
+    token_cmds = [ ]
+
+    lineno=0
+    for line in open(filename):
+        lineno += 1        
+        line = line.strip()
+        if len(line) == 0 or line == "%":
+            continue
+        match = scan_line(line)
+        if len(match) == 0:
+            raise Exception("Unable to scan line #%d '%s'" % (lineno, line))
+
+        def parse_expr(tag,simple,compl):
+            if len(simple) > 0 and len(compl) > 0:
+                raise Exception("Line #%d: Mis-parse of command arguments: %s %s %s" 
+                                % (lineno, tag, simple, compl))
+            if len(compl) == 0:
+                return { "tag" : tag, "value" : float(simple) }            
+            return { "tag" : tag, "expr" : compl.strip("[]").replace("#", "V") }
+
+        if "args" in match:
+            match["args"] = [ parse_expr(tag, simple, compl) for tag,simple,compl in match["args"] ]
+        token_cmds.append(match)
+    print len(token_cmds)
+
+    variables = { '__builtins__': None }    
 
     # trace whatever last evaluated value for these arguments was
     cur_args = { "X" : 0.0, "Y" : 0.0, "Z" : 0.0, "F" : 0.0 }
 
-    def evaluate_expr(expr):
-        if isinstance(expr, list) and len(expr) == 3 and expr[0] in opn: # expression
-            res = opn[expr[0]](evaluate_expr(expr[1]), evaluate_expr(expr[2]))
-            return res
-        elif isinstance(expr, list) and len(expr) == 1:
-            return evaluate_expr(expr[0])
-        elif isinstance(expr,str) and expr in variables:
-            return variables[expr]
-        else:
-            return expr    
-
     def evaluate_command(command): 
-        if command[0] == "Comment":
-            return command_classes["Comment"](cur_args, {}, command[1])
-        if not isinstance(command[0],str):
-            print "Misparsed command %s" % command
-        elif command[0] in command_classes: # command
-            args = [ a for a in command[1:] if not isinstance(a, list) or a[0] != "Comment" ]
-            comments = [a[1] for a in command[1:] if not a in args ]            
+        comment = command.get("comment", "")
+        if "assign" in command: # assingment
+            variable = command["assign"].replace("#", "V")
+            variables[variable] = eval( command["expr"].strip("[]"), variables, {} )
+            return None
+        elif command.get("command", None) in command_classes: # known command
+            args = command["args"]
             named_args = {}
             for a in args:
-                named_args[a[0]] = evaluate_expr(a[1])
-            result = command_classes[command[0]](cur_args, named_args, comments)
+                if "value" in a:
+                    named_args[a["tag"]] = a["value"] # simple
+                else:
+                    named_args[a["tag"]] = eval( a["expr"], variables, {} )
+            result = command_classes[command["command"]](cur_args, named_args, comment)
             cur_args.update(named_args)
             return result
-        
-        elif command[0].startswith("#"): # assignment
-            variables[command[0]] = evaluate_expr(command[1])
+        elif len(comment) > 0:
+            return Comment(cur_args, {}, comment)
         else:
-            print "Unrecognised command %s" % command
+            raise Exception("Unrecognised command %s" % command)
 
-    evl = [ evaluate_command(command) for command in ast if len(command) > 0 ]
+    evl = [ evaluate_command(command) for command in token_cmds ]
     evl = [ c for c in evl if c is not None ]
     return evl
 
-# grammar
 
-def make_infix( toks ):
-    if isinstance(toks, ParseResults) and len(toks) == 3 and toks[1] in opn:
-        return [ toks[1], make_infix(toks[0]), make_infix(toks[2]) ]
-    return toks
+# top-level command elements
 
-# define grammar
-# basic tokens
+def get_cmd_arg_expr(with_tag):
+    arg_tag = r"([A-Z])"
+    number_arg = r"(-?\d+(?:\.\d+))"
+    expr_arg = r"(\[[^\]]+\])" # args can either be simple numbers (parse by regex) or expressions (parse by pyparsing)
+    return r"(?:%s(?:%s|%s))" % (arg_tag if with_tag else "", number_arg, expr_arg)    
 
-point = Literal('.')
-plusorminus = Literal('+') | Literal('-')
-number = Word(nums) 
-integer = Combine( Optional(plusorminus) + number )
-float_number = Combine( integer +
-                       Optional( point + Optional(number) )  ).setParseAction(lambda t:float(t[0]))
-variable_ref = Combine( Literal("#") + integer )
+def get_cmd_assign_expr():
+    return r"(#\d+)\s*=\s*" + get_cmd_arg_expr(False)
 
-# commands
-expr = Forward()
-command_arg = Group(Word("XYZIJKF", max=1) + expr)
+RE_ASSIGN =  re.compile(get_cmd_assign_expr())     # ie #33 = 4 * 5 + #1
+RE_CMDTAG = re.compile("^([GM]\d+)")               # ie M03 or G22
+RE_CMD_ARG = re.compile(get_cmd_arg_expr(True))    # ie X3.0 or Z[#11+3]
+RE_COMMENT_EOL = re.compile("(?:\(([^\)]*)\))$")   # ie (Some comment at the end of a line)
 
-comment = Literal("(").suppress() + Regex(r"[^\)]+").setParseAction(lambda t:t.insert(0,"Comment")) + Literal(")").suppress()
-m_command = Combine(Literal("M") + integer) + Optional(Group(comment))
-g_command = Combine(Literal("G") + integer) + ZeroOrMore(command_arg) + Optional(Group(comment))
-assignment = variable_ref + Literal("=").suppress() + expr + Optional(Group(comment))                                                                      
+# scan a line into a dict indicating a match for one of the above common line forms
+def scan_line(line):
+    res = {}
+    cmd = re.match(RE_CMDTAG, line)
+    if cmd is not None:        # if it looks like a command, pull all the individual arguments
+        args = re.findall(RE_CMD_ARG, line)
+        res = { "command" : cmd.group(1), "args" : args }
+    else:
+        asn = re.match(RE_ASSIGN, line)
+        if asn is not None:
+            res = { "assign" : asn.group(1), "expr" : asn.group(2) }
 
-command = (m_command | g_command | assignment) #.setParseAction(lambda t:t.insert(0,"Command"))
-command_line = Group( command | comment )
-
-ignore = ( Literal("%") )
-line = LineStart() + ZeroOrMore(command_line|ignore.suppress()) + LineEnd()
-script = OneOrMore(line) + StringEnd()
-
-
-# arithmetic expressions
-plus  = Literal( "+" )
-minus = Literal( "-" )
-mult  = Literal( "*" )
-div   = Literal( "/" )
-addop  = plus | minus
-multop = mult | div
-lbrk = Literal("[").suppress()
-rbrk = Literal("]").suppress()
-        
-atom = ( float_number | integer | variable_ref ) | ( lbrk + expr + rbrk )
-term = Group( atom + ZeroOrMore( ( multop + atom ) ) ).setParseAction(make_infix)
-expr << ( term + ZeroOrMore( ( addop + term ) ) ).setParseAction( make_infix )
-
-# map operator symbols to corresponding arithmetic operations
-opn = { "+" : ( lambda a,b: a + b ),
-        "-" : ( lambda a,b: a - b ),
-        "*" : ( lambda a,b: a * b ),
-        "/" : ( lambda a,b: a / b ) 
-        }
- 
+    com = re.match(RE_COMMENT_EOL, line)
+    if com is not None:
+        res["comment"] = com.group(1)
+    return res
