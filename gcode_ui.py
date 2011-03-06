@@ -159,10 +159,9 @@ class GCodeFrame(wx.Frame):
             self.Connect(-1, -1, EVT_ENGRAVING_CMD_END_ID, self.on_engrave_cmd_end)
             self.Connect(-1, -1, EVT_ENGRAVING_CMD_START_ID, self.on_engrave_cmd_start)
 
+            self.disable_when_engraving = [ ]
             controls = self.get_control_buttons(panel)
             modes = self.get_mode_settings(panel)
-
-            self.disable_when_engraving = [ controls, modes ]
 
             self.preview = PreviewPanel(panel, lambda:(self.commands, self.cur_index))            
 
@@ -186,6 +185,7 @@ class GCodeFrame(wx.Frame):
             self.Bind(wx.EVT_BUTTON,self.on_engrave,self.btn_engrave)
             self.btn_engrave.SetDefault()
             self.engraving = False
+            self.disable_when_engraving.append(self.btn_engrave)
 
             self.btn_stop = wx.Button(panel, label="Stop")
             self.Bind(wx.EVT_BUTTON,self.on_stop, self.btn_stop)
@@ -203,6 +203,8 @@ class GCodeFrame(wx.Frame):
 
             self.chk_headup = wx.CheckBox(panel, label="Keep Head Up")
             self.chk_spindleoff = wx.CheckBox(panel, label="Keep Spindle Off")
+
+            self.disable_when_engraving += [self.chk_simulation, self.chk_headup, self.chk_spindleoff]
 
             # layout
             box = wx.StaticBoxSizer(wx.StaticBox(panel, label="Modes"), wx.VERTICAL)
@@ -235,7 +237,8 @@ class GCodeFrame(wx.Frame):
                 self.distance_travelled = 0
                 self.total_distance = self.get_distance()
                 self.engraving = True
-                self.btn_engrave.Enabled = False
+                for c in self.disable_when_engraving:
+                    c.Enabled = False
                 self.btn_stop.Enabled = True
                 self.worker = WorkerThread(self, AMCRenderer(self.controller, 
                                                              keep_spindle_off=self.chk_spindleoff.Value, 
@@ -264,14 +267,14 @@ class GCodeFrame(wx.Frame):
                                (self.cur_index, len(self.commands), self.distance_travelled, 
                                 self.total_distance, 100.0/self.total_distance*self.distance_travelled))                                             
 
-
         def on_engraving_done(self, event):
             self.controller.set_head_down(False)
             self.controller.set_spindle(False)
             if event.error is not None:
                 self.show_dialog(event.error)
             self.engraving = False
-            self.btn_engrave.Enabled = True
+            for c in self.disable_when_engraving:
+                c.Enabled = True
             self.btn_stop.Enabled = False
             self.cur_index = None
                                          
