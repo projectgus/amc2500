@@ -36,7 +36,7 @@ def process(filename):
     print "Parsing %s" % filename
     commands = parse(filename)
     print "Extracted %d commands" % len(commands)
-    frame = PreviewFrame(commands)
+    frame = GCodeFrame(commands)
 
 @is_visitor
 class DCRenderer:
@@ -144,21 +144,15 @@ class WorkerThread(Thread):
         self._aborting = True
 
 
-class PreviewFrame(wx.Frame):
+class GCodeFrame(wx.Frame):
         def __init__(self, commands):
             wx.Frame.__init__( self,
-                               None, -1, "Plot Preview",
+                               None, -1, "GCode Plot",
                                size=(500,500) )
             panel = wx.Panel(self, -1)
             self.commands = commands
             self.cur_index = None
-            self.preview_renderer = None
-            self.canvas = wx.Panel(panel, -1)
-            self.canvas.Bind(wx.EVT_PAINT, self.on_paint)            
-            self.last_size = None
-            self.canvas.Bind(wx.EVT_SIZE, self.on_size)
-            self.on_size(None)
-
+ 
             self.Connect(-1, -1, EVT_ENGRAVING_DONE_ID, self.on_engraving_done)
             self.Connect(-1, -1, EVT_ENGRAVING_CMD_END_ID, self.on_engrave_cmd_end)
             self.Connect(-1, -1, EVT_ENGRAVING_CMD_START_ID, self.on_engrave_cmd_start)
@@ -166,11 +160,15 @@ class PreviewFrame(wx.Frame):
             controls = self.get_control_buttons(panel)
             modes = self.get_mode_settings(panel)
 
+            self.disable_when_engraving = [ controls, modes ]
+
+            self.preview = PreviewPanel(panel, lambda:(self.commands, self.cur_index))            
+
             # layout
             grid = wx.GridBagSizer(vgap=5,hgap=5 )
             
             grid.AddMany([
-                    (self.canvas,           (0,0), (50,1), wx.EXPAND),
+                    (self.preview,           (0,0), (50,1), wx.EXPAND),
 
                     (controls,              (0,1), (2,1), wx.EXPAND),
                     (modes,                 (2,1), (2,2), wx.EXPAND),
@@ -210,49 +208,6 @@ class PreviewFrame(wx.Frame):
             box.Add(self.chk_headup)
             box.Add(self.chk_spindleoff)
             return box
-
-                       
-        def on_paint(self, event):
-            dc = wx.GCDC(wx.BufferedPaintDC(self.canvas, self._buffer))
-
-        def update_drawing(self):
-            dc = wx.GCDC(wx.BufferedDC(wx.ClientDC(self.canvas), self._buffer))
-            self.do_drawing(dc)
-            
-        def scale_dc(self, dc):
-            sx = float(self.canvas.Size.width) / TOTAL_WIDTH
-            sy = float(self.canvas.Size.height) / TOTAL_HEIGHT
-            scale = min(sx, sy)
-            dc.SetUserScale(scale, scale)
-
-        def do_drawing(self, dc):
-            dc.BeginDrawing()
-            dc.SetBackground( wx.Brush("White") )
-            dc.Clear()
-            self.scale_dc(dc)
-            dc.SetPen(wx.Pen("DARKGREY", 4))
-            dc.DrawRectangle(BED_X, BED_Y, BED_WIDTH, BED_HEIGHT)
-            if self.preview_renderer is None:
-                self.preview_renderer = DCRenderer(up_colour="LIGHTGREY", down_colour="BLACK")            
-            self.preview_renderer.down_colour = "BLACK"
-            index = 0
-            for cmd in self.commands:
-                if self.cur_index is None or index > self.cur_index:
-                    self.preview_renderer.down_colour = "DARKGREY" # onto preview section
-                self.preview_renderer.render(cmd, dc, None)
-                index += 1
-            dc.EndDrawing()
-
-        def on_size(self, event):
-            size = self.canvas.GetClientSizeTuple()
-            if size == self.last_size:
-                return # No change in size, no need to redraw
-            self.last_size = size
-            width,height = size
-            print "making bitmap %s,%s" % (width,height)
-            self._buffer = wx.EmptyBitmap(width, height)
-            self.update_drawing()
-
                                  
         def on_engrave(self, event):
             if self.engraving:
@@ -263,8 +218,8 @@ class PreviewFrame(wx.Frame):
                     self.controller = SimController()
                 else:
                     self.controller = AMC2500()     
-                self.preview_renderer = None
-                self.update_drawing()
+                self.preview.update_drawing()
+                self.cur_renderer = DCRenderer(down_colour="GREEN", up_colour="LIGHTGREEN")
                 self.done_renderer = DCRenderer(down_colour="BLACK")                      
                 self.engraving = True
                 self.btn_engrave.Enabled = False
@@ -277,19 +232,18 @@ class PreviewFrame(wx.Frame):
                 self.controller.zero()
 
         def on_engrave_cmd_start(self, event):
-            """cmd start just draws green to canvas, will be replaced by black on cmd end or resize"""
+            """cmd start just draws green to canvas temporarily, 
+            will be replaced by black on cmd end or resize"""
             self.cur_index = event.index
             command = self.commands[event.index]
-            dc = wx.GCDC(wx.ClientDC(self.canvas))
-            self.scale_dc(dc)
-            self.preview_renderer.render(command, dc, "GREEN")
+            dc = self.preview.get_instant_dc()
+            self.cur_renderer.render(command, dc, "GREEN")
 
         def on_engrave_cmd_end(self, event):
             """cmd end draws in black, draws to both backing buffer and current canvas"""
             self.cur_index = event.index+1
             command = self.commands[event.index]
-            dc = wx.GCDC(wx.BufferedDC(wx.ClientDC(self.canvas), self._buffer))
-            self.scale_dc(dc)
+            dc = self.preview.get_buffered_dc()
             self.done_renderer.render(command, dc) # immediate to screen
 
 
@@ -318,6 +272,84 @@ class PreviewFrame(wx.Frame):
                 dlg.ShowModal()
                 dlg.Destroy()
 
+
+class PreviewPanel(wx.Panel):
+    """ Panel for previewing a set of gcode commands to a window 
+    
+    Provides buffered & unbuffered clientdcs for doing temporary & permanent
+    rendering to the panel.
+    """
+    def __init__(self, parent, command_cb):
+        """
+        command_cb = a callback which returns a tuple (commands, index) for the current list of commands
+        and the current index (if engraving is in progress)
+        """
+        wx.Panel.__init__(self,parent)
+        self.Bind(wx.EVT_PAINT, self._on_paint)            
+        self.Bind(wx.EVT_SIZE, self._on_size)
+        self._last_size = None
+        self._command_cb = command_cb
+        self._on_size(None) # initial redraw
+        
+    def update_drawing(self):
+        """Call this method to redraw the entire gcode layout"""
+        dc = wx.GCDC(wx.BufferedDC(wx.ClientDC(self), self._buffer))
+        self._do_drawing(dc)
+            
+        
+    def get_instant_dc(self):
+        """Call this method to get a non-buffered DC which will be erased when the panel
+        next redraws properly"""
+        dc = wx.GCDC(wx.ClientDC(self))
+        self._scale_dc(dc)
+        return dc
+        
+    def get_buffered_dc(self):
+        """Call this method to get a buffered DC to make changes via the back-buffer"""
+        dc = wx.GCDC(wx.BufferedDC(wx.ClientDC(self), self._buffer))
+        self._scale_dc(dc)
+        return dc
+
+    # internal methods follow
+
+    def _scale_dc(self, dc):
+        sx = float(self.Size.width) / TOTAL_WIDTH
+        sy = float(self.Size.height) / TOTAL_HEIGHT
+        scale = min(sx, sy)
+        dc.SetUserScale(scale, scale)
+        
+    def _do_drawing(self, dc):
+        dc.BeginDrawing()
+        dc.SetBackground( wx.Brush("White") )
+        dc.Clear()
+        self._scale_dc(dc)
+        dc.SetPen(wx.Pen("DARKGREY", 4))
+        dc.DrawRectangle(BED_X, BED_Y, BED_WIDTH, BED_HEIGHT)
+        preview_renderer = DCRenderer(up_colour="LIGHTGREY", down_colour="BLACK")            
+        render_index = 0
+        (commands, index) = self._command_cb() # callback gets all current commands, index point
+        for cmd in commands:
+            if index is None or render_index > index:
+                preview_renderer.down_colour = "DARKGREY" # past "drawn" section, onto preview section
+            preview_renderer.render(cmd, dc, None)
+            render_index += 1
+        dc.EndDrawing()
+                
+    def _on_paint(self, event):
+        """ Paint event doesn't do anything except to blit in the pre-existing buffer"""
+        dc = wx.GCDC(wx.BufferedPaintDC(self, self._buffer))
+
+    def _on_size(self, event):
+        size = self.GetClientSizeTuple()
+        if size == self._last_size:
+            return # No change in size, no need to redraw
+        self._last_size = size
+        width,height = size
+        print "making bitmap %s,%s" % (width,height)
+        self._buffer = wx.EmptyBitmap(width, height)
+        self.update_drawing()
+        
+        
 
 def main():
     app = wx.PySimpleApp()
