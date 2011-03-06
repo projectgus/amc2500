@@ -228,7 +228,7 @@ class GCodeFrame(wx.Frame):
                                                              keep_spindle_off=self.chk_spindleoff.Value, 
                                                              keep_head_up=self.chk_headup.Value))
             except AMCError as e:
-                self.show_error("Failed to start engraving: %s" % str(e))
+                self.show_dialog("Failed to start engraving: %s" % str(e))
                 self.controller.zero()
 
         def on_engrave_cmd_start(self, event):
@@ -249,7 +249,7 @@ class GCodeFrame(wx.Frame):
 
         def on_engraving_done(self, event):
             if event.error is not None:
-                self.show_error(event.error)
+                self.show_dialog(event.error)
             self.engraving = False
             self.btn_engrave.Enabled = True
             self.btn_stop.Enabled = False
@@ -260,9 +260,12 @@ class GCodeFrame(wx.Frame):
             if not self.engraving:
                 return
             self.engraving = False
-
-
-        def show_error(self, msg):
+            self.worker.abort()            
+            self.controller.set_head_down(False)
+            self.controller.set_spindle(False)
+            self.show_dialog("Engraving stopped early due to stop button.")
+            
+        def show_dialog(self, msg):
                 dlg = wx.MessageDialog( 
                     self, 
                     str(msg),
@@ -292,7 +295,9 @@ class PreviewPanel(wx.Panel):
         self._on_size(None) # initial redraw
         
     def update_drawing(self):
-        """Call this method to redraw the entire gcode layout"""
+        """Call this method to redraw the entire gcode layout from scratch
+
+        This is an expensive method, only call it if something has really changed."""
         dc = wx.GCDC(wx.BufferedDC(wx.ClientDC(self), self._buffer))
         self._do_drawing(dc)
             
