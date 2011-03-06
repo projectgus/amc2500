@@ -12,7 +12,7 @@ Guidelines for gcode files:
 * Z axis >0 is "head up", Z axis 0 or below is "head down"
 """
 
-import sys, wx
+import sys, wx, os
 from amc2500 import *
 from gcode import *
 from visitor import is_visitor, when
@@ -29,14 +29,6 @@ BED_HEIGHT=322
 BED_WIDTH=271
 BED_X = 35
 BED_Y = 55
-
-
-
-def process(filename):    
-    print "Parsing %s" % filename
-    commands = parse(filename)
-    print "Extracted %d commands" % len(commands)
-    frame = GCodeFrame(commands)
 
 @is_visitor
 class DCRenderer:
@@ -88,6 +80,10 @@ class DCRenderer:
 EVT_ENGRAVING_DONE_ID = wx.NewId()
 EVT_ENGRAVING_CMD_START_ID = wx.NewId()
 EVT_ENGRAVING_CMD_END_ID = wx.NewId()
+
+ID_OPEN=wx.NewId()
+ID_RELOAD=wx.NewId()
+ID_CLOSE=wx.NewId()
 
 class EngravingDoneEvent(wx.PyEvent):
      """Event to signify that engraving is done"""
@@ -145,14 +141,16 @@ class WorkerThread(Thread):
 
 
 class GCodeFrame(wx.Frame):
-        def __init__(self, commands):
+        def __init__(self, load_path=None):
             wx.Frame.__init__( self,
                                None, -1, "GCode Plot",
                                size=(700,500) )
             panel = wx.Panel(self, -1)
-            self.commands = commands
+            self.commands = None
+            self.path = None
             self.cur_index = None
             self.CreateStatusBar()
+            self.SetMenuBar(self.get_menu_bar())
             self.update_status_idle()
  
             self.Connect(-1, -1, EVT_ENGRAVING_DONE_ID, self.on_engraving_done)
@@ -177,6 +175,9 @@ class GCodeFrame(wx.Frame):
             grid.AddGrowableRow(2)
             grid.AddGrowableCol(0)
             panel.SetSizerAndFit(grid, wx.EXPAND)
+            
+            if load_path is not None:
+                wx.CallAfter(self.load_gcode_file, load_path)
             self.Show()
 
 
@@ -200,7 +201,6 @@ class GCodeFrame(wx.Frame):
         def get_mode_settings(self, panel):
             self.chk_simulation = wx.CheckBox(panel, label="Simulation Mode")
             self.chk_simulation.Value = True
-
             self.chk_headup = wx.CheckBox(panel, label="Keep Head Up")
             self.chk_spindleoff = wx.CheckBox(panel, label="Keep Spindle Off")
 
@@ -214,13 +214,69 @@ class GCodeFrame(wx.Frame):
             return box
                                
 
+        def get_menu_bar(self):
+            fil = wx.Menu()
+            fil.Append(ID_OPEN, "&Open GCode File...\tCtrl-O", "Open a new gcode file")
+            fil.Append(ID_RELOAD, "&Reload GCode\tCtrl-R", "Reload the current gcode file")            
+            fil.AppendSeparator()
+            fil.Append(ID_CLOSE, "&Quit Program\tCtrl-Q", "Terminate the program")
+            
+            menuBar = wx.MenuBar()
+            menuBar.Append(fil, "&File");
+
+            wx.EVT_MENU(self, ID_OPEN, self.on_open_file)
+            wx.EVT_MENU(self, ID_RELOAD, self.on_reload_file)
+            wx.EVT_MENU(self, ID_CLOSE, lambda e: self.Close() )
+
+            return menuBar
+
         def update_status_idle(self):
+            if self.commands is None:
+                self.SetStatusText("No GCode file has been opened yet")
+                return
             distance = self.get_distance()
             self.SetStatusText("%d GCode commands, total distance %.2f" % 
                                (len(self.commands), distance))                                                                               
         def get_distance(self):
             return sum( (c.get_distance() for c in self.commands) )
         
+        def on_open_file(self, event):
+            if self.engraving:
+                return
+            filters = 'GCode Files (*.ngc)|*.ngc|All files (*.*)'
+            dialog = wx.FileDialog( None, message = 'Open new GCode file....', 
+                                    wildcard=filters, style = wx.OPEN)        
+            if dialog.ShowModal() == wx.ID_OK:
+                self.load_gcode_file(dialog.GetPath())
+
+
+        def load_gcode_file(self, path):
+            self.path = path
+            self.on_reload_file()
+
+        def on_reload_file(self, event=None):            
+            if self.engraving:
+                return
+            waitCursor = wx.StockCursor(wx.CURSOR_WAIT)
+            normalCursor = wx.StockCursor(wx.CURSOR_ARROW)
+
+            err = None
+            try:
+                self.SetStatusText("Loading gcode %s..." % self.path)
+                wx.SetCursor(waitCursor)
+                wx.Yield() # this particular yield-update-yield sequence seems necessary
+                self.UpdateWindowUI() # on GTK (Ubuntu) to get a wait cursor @ startup & when reloading
+                wx.Yield()
+                self.commands = parse(self.path)
+                self.update_status_idle()
+                self.preview.update_drawing()
+                self.SetTitle("GCode Plot %s" % (os.path.basename(self.path)))
+            except Exception as e:
+                err = e 
+            wx.SetCursor(normalCursor)
+            if err is not None:
+                self.show_dialog("Could not open %s: %s" % (self.path, err))                                
+
         def on_engrave(self, event):
             if self.engraving:
                 return # already running
@@ -352,6 +408,8 @@ class PreviewPanel(wx.Panel):
         preview_renderer = DCRenderer(up_colour="LIGHTGREY", down_colour="BLACK")            
         render_index = 0
         (commands, index) = self._command_cb() # callback gets all current commands, index point
+        if commands is None:
+            commands = []
         for cmd in commands:
             if index is None or render_index > index:
                 preview_renderer.down_colour = "DARKGREY" # past "drawn" section, onto preview section
@@ -369,7 +427,6 @@ class PreviewPanel(wx.Panel):
             return # No change in size, no need to redraw
         self._last_size = size
         width,height = size
-        print "making bitmap %s,%s" % (width,height)
         self._buffer = wx.EmptyBitmap(width, height)
         self.update_drawing()
         
@@ -377,7 +434,7 @@ class PreviewPanel(wx.Panel):
 
 def main():
     app = wx.PySimpleApp()
-    process(sys.argv[1])
+    frame = GCodeFrame(sys.argv[1] if len(sys.argv) > 1 else None)
     app.MainLoop()
     app.Destroy()
 
