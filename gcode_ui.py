@@ -155,6 +155,7 @@ class PreviewFrame(wx.Frame):
             self.preview_renderer = None
             self.canvas = wx.Panel(panel, -1)
             self.canvas.Bind(wx.EVT_PAINT, self.on_paint)            
+            self.last_size = None
             self.canvas.Bind(wx.EVT_SIZE, self.on_size)
             self.on_size(None)
 
@@ -243,7 +244,11 @@ class PreviewFrame(wx.Frame):
             dc.EndDrawing()
 
         def on_size(self, event):
-            width,height = self.canvas.GetClientSizeTuple()
+            size = self.canvas.GetClientSizeTuple()
+            if size == self.last_size:
+                return # No change in size, no need to redraw
+            self.last_size = size
+            width,height = size
             print "making bitmap %s,%s" % (width,height)
             self._buffer = wx.EmptyBitmap(width, height)
             self.update_drawing()
