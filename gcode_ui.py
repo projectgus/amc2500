@@ -12,7 +12,7 @@ Guidelines for gcode files:
 * Z axis >0 is "head up", Z axis 0 or below is "head down"
 """
 
-import sys, wx, os
+import sys, wx, os, traceback
 from amc2500 import *
 from gcode import *
 from visitor import is_visitor, when
@@ -133,6 +133,7 @@ class WorkerThread(Thread):
                 wx.PostEvent(self._window, EngravingCmdEnd(i))
             wx.PostEvent(self._window, EngravingDoneEvent(None))
         except Exception as e:
+            traceback.print_exc()
             wx.PostEvent(self._window, EngravingDoneEvent(e))
             controller.zero()
  
