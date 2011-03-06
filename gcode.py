@@ -9,7 +9,7 @@ AMC2500 CNC controller.
 """
 
 from pyparsing import *
-import sys
+import sys, math
 
 
 # Command classes for the gcode object model
@@ -17,6 +17,10 @@ import sys
 class BaseCommand(object):
     def __init__(self, last_args, args, comments):
         self.comment = " ".join(comments) if isinstance(comments, list) else comments
+
+    def get_distance(self):
+        """Returns the number of units spanned/travelled by this command"""
+        return 0
     
 
 class Comment(BaseCommand):
@@ -40,6 +44,9 @@ class LinearCommand(BaseCommand):
                                                             self.fr_x, self.fr_y, self.fr_z,    
                                                             self.to_x, self.to_y, self.to_z,
                                                             self.f, self.comment )
+
+    def get_distance(self):
+        return math.hypot(self.fr_x-self.to_x, self.fr_y-self.to_y)
 
 class G00(LinearCommand):
     """ G00 - high speed move (slew) """

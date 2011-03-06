@@ -148,10 +148,12 @@ class GCodeFrame(wx.Frame):
         def __init__(self, commands):
             wx.Frame.__init__( self,
                                None, -1, "GCode Plot",
-                               size=(500,500) )
+                               size=(700,500) )
             panel = wx.Panel(self, -1)
             self.commands = commands
             self.cur_index = None
+            self.CreateStatusBar()
+            self.update_status_idle()
  
             self.Connect(-1, -1, EVT_ENGRAVING_DONE_ID, self.on_engraving_done)
             self.Connect(-1, -1, EVT_ENGRAVING_CMD_END_ID, self.on_engrave_cmd_end)
@@ -208,11 +210,20 @@ class GCodeFrame(wx.Frame):
             box.Add(self.chk_headup)
             box.Add(self.chk_spindleoff)
             return box
-                                 
+                               
+
+        def update_status_idle(self):
+            distance = self.get_distance()
+            self.SetStatusText("%d GCode commands, total distance %.2f" % 
+                               (len(self.commands), distance))                                                                               
+        def get_distance(self):
+            return sum( (c.get_distance() for c in self.commands) )
+        
         def on_engrave(self, event):
             if self.engraving:
                 return # already running
                         
+            self.update_status_idle()
             try:
                 if self.chk_simulation.Value:
                     self.controller = SimController()
@@ -221,6 +232,8 @@ class GCodeFrame(wx.Frame):
                 self.preview.update_drawing()
                 self.cur_renderer = DCRenderer(down_colour="GREEN", up_colour="LIGHTGREEN")
                 self.done_renderer = DCRenderer(down_colour="BLACK")                      
+                self.distance_travelled = 0
+                self.total_distance = self.get_distance()
                 self.engraving = True
                 self.btn_engrave.Enabled = False
                 self.btn_stop.Enabled = True
@@ -246,23 +259,26 @@ class GCodeFrame(wx.Frame):
             dc = self.preview.get_buffered_dc()
             self.done_renderer.render(command, dc) # immediate to screen
 
+            self.distance_travelled += command.get_distance()
+            self.SetStatusText("%d/%d GCode commands complete, travelled %.2f/%.2f (%d%%)" %
+                               (self.cur_index, len(self.commands), self.distance_travelled, 
+                                self.total_distance, 100.0/self.total_distance*self.distance_travelled))                                             
+
 
         def on_engraving_done(self, event):
+            self.controller.set_head_down(False)
+            self.controller.set_spindle(False)
             if event.error is not None:
                 self.show_dialog(event.error)
             self.engraving = False
             self.btn_engrave.Enabled = True
             self.btn_stop.Enabled = False
             self.cur_index = None
-
                                          
         def on_stop(self, index):
             if not self.engraving:
                 return
-            self.engraving = False
             self.worker.abort()            
-            self.controller.set_head_down(False)
-            self.controller.set_spindle(False)
             self.show_dialog("Engraving stopped early due to stop button.")
             
         def show_dialog(self, msg):
