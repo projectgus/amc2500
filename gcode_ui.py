@@ -158,6 +158,29 @@ class PreviewFrame(wx.Frame):
             self.canvas.Bind(wx.EVT_SIZE, self.on_size)
             self.on_size(None)
 
+            self.Connect(-1, -1, EVT_ENGRAVING_DONE_ID, self.on_engraving_done)
+            self.Connect(-1, -1, EVT_ENGRAVING_CMD_END_ID, self.on_engrave_cmd_end)
+            self.Connect(-1, -1, EVT_ENGRAVING_CMD_START_ID, self.on_engrave_cmd_start)
+
+            controls = self.get_control_buttons(panel)
+            modes = self.get_mode_settings(panel)
+
+            # layout
+            grid = wx.GridBagSizer(vgap=5,hgap=5 )
+            
+            grid.AddMany([
+                    (self.canvas,           (0,0), (50,1), wx.EXPAND),
+
+                    (controls,              (0,1), (2,1), wx.EXPAND),
+                    (modes,                 (2,1), (2,2), wx.EXPAND),
+                    ])
+            grid.AddGrowableRow(2)
+            grid.AddGrowableCol(0)
+            panel.SetSizerAndFit(grid, wx.EXPAND)
+            self.Show()
+
+
+        def get_control_buttons(self, panel):
             self.btn_engrave = wx.Button(panel, label="Engrave")
             self.Bind(wx.EVT_BUTTON,self.on_engrave,self.btn_engrave)
             self.btn_engrave.SetDefault()
@@ -167,28 +190,26 @@ class PreviewFrame(wx.Frame):
             self.Bind(wx.EVT_BUTTON,self.on_stop, self.btn_stop)
             self.btn_stop.Enabled = False
 
+            # layout            
+            box = wx.StaticBoxSizer(wx.StaticBox(panel, label="Controls"), wx.HORIZONTAL)
+            box.Add(self.btn_engrave)
+            box.Add(self.btn_stop)
+            return box
+
+        def get_mode_settings(self, panel):
             self.chk_simulation = wx.CheckBox(panel, label="Simulation Mode")
             self.chk_simulation.Value = True
-            
-            self.Connect(-1, -1, EVT_ENGRAVING_DONE_ID, self.on_engraving_done)
-            self.Connect(-1, -1, EVT_ENGRAVING_CMD_END_ID, self.on_engrave_cmd_end)
-            self.Connect(-1, -1, EVT_ENGRAVING_CMD_START_ID, self.on_engrave_cmd_start)
+
+            self.chk_headup = wx.CheckBox(panel, label="Keep Head Up")
+            self.chk_spindleoff = wx.CheckBox(panel, label="Keep Spindle Off")
 
             # layout
-            grid = wx.GridBagSizer(vgap=5 )
-            
-            grid.AddMany([
-                    (self.btn_engrave,      (0,0), (1,1)),
-                    (self.btn_stop,         (0,1), (1,1)),
+            box = wx.StaticBoxSizer(wx.StaticBox(panel, label="Modes"), wx.VERTICAL)
+            box.Add(self.chk_simulation)
+            box.Add(self.chk_headup)
+            box.Add(self.chk_spindleoff)
+            return box
 
-                    (self.chk_simulation,   (1,0), (1,1)),                   
-
-                    (self.canvas,                    (2,0), (1,2), wx.EXPAND),
-                    ])
-            grid.AddGrowableRow(2)
-            grid.AddGrowableCol(0)
-            panel.SetSizerAndFit(grid, wx.EXPAND)
-            self.Show()
                        
         def on_paint(self, event):
             dc = wx.GCDC(wx.BufferedPaintDC(self.canvas, self._buffer))
@@ -243,7 +264,9 @@ class PreviewFrame(wx.Frame):
                 self.engraving = True
                 self.btn_engrave.Enabled = False
                 self.btn_stop.Enabled = True
-                self.worker = WorkerThread(self, AMCRenderer(self.controller))
+                self.worker = WorkerThread(self, AMCRenderer(self.controller, 
+                                                             keep_spindle_off=self.chk_spindleoff.Value, 
+                                                             keep_head_up=self.chk_headup.Value))
             except AMCError as e:
                 self.show_error("Failed to start engraving: %s" % str(e))
                 self.controller.zero()
