@@ -166,7 +166,7 @@ def parse(filename):
     variables = { '__builtins__': None }    
 
     # trace whatever last evaluated value for these arguments was
-    cur_args = { "X" : 0.0, "Y" : 0.0, "Z" : 0.0, "F" : 0.0 }
+    cur_args = { "X" : 0.0, "Y" : 0.0, "Z" : None, "F" : None }
 
     def evaluate_command(command): 
         comment = command.get("comment", "")

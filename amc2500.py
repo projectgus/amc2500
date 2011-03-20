@@ -451,6 +451,11 @@ class FakeSerial:
                 self.buffer.insert(0, "echo off")                
             elif re.search(r"^H.$", line) is not None: # head up/down
                 self.buffer.insert(0, "OK0,0,0")
+            elif line in [ "VS0", "VM0", "AT0" ]:
+                raise AMCError("Cannot set a zero speed (bad command %s)" % line)
+            elif line == "DA0,0,0":
+                raise AMCError("Cannot set DA0,0,0 non-movement (breaks controller)")
+                
             # TODO: recognise jog commands, other commands w/ responses 
 
         return len(data)
@@ -494,9 +499,12 @@ class AMCRenderer:
 
     @when(LinearCommand)
     def render(self, cmd):
-        self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
-        self.controller.set_speed(cmd.f / 60)
-        self.controller.move_to(cmd.to_x, cmd.to_y)
+        if cmd.to_z is not None:
+            self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
+        if cmd.f is not None:
+            self.controller.set_speed(cmd.f / 60)
+        if cmd.to_x is not None and cmd.to_y is not None:
+            self.controller.move_to(cmd.to_x, cmd.to_y)
         self.home = self.home and self.controller.limits == (-1,-1) # still on home?
         if self.controller.limits != (0,0) and not self.home:
             raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
