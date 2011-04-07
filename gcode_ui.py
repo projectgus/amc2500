@@ -60,15 +60,29 @@ class DCRenderer:
     def render(self, cmd, dc, override_colour=None):
         pass
 
-    @when(LinearCommand, allow_cascaded_calls=True)
+    @when(LinearCommand)
     def render(self, cmd, dc, override_colour=None):
         self.head = cmd.to_z <= 0
+        dc.SetBrush(wx.Brush(None, wx.TRANSPARENT))
         dc.SetPen(wx.Pen(self.get_colour(override_colour), 1 if self.head else 0.2))
         if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
             return # just a Z movement
         lines = [ [cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y] ]
         dc.DrawLineList(lines)
         
+    @when(ArcCommand)
+    def render(self, cmd, dc, override_colour=None):
+        self.head = cmd.to_z <= 0
+        dc.SetBrush(wx.Brush(None, wx.TRANSPARENT))
+        dc.SetPen(wx.Pen(self.get_colour(override_colour), 1 if self.head else 0.2))
+        if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
+            return # just a Z movement
+
+        if cmd.cw :
+            dc.DrawArc(cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y)
+        else:
+            dc.DrawArc(cmd.to_x, cmd.to_y, cmd.fr_x, cmd.fr_y, cmd.cn_x, cmd.cn_y)
+
     @when(M3)
     def render(self, cmd, dc, override_colour=None):
         self.spindle = True
@@ -273,7 +287,7 @@ class GCodeFrame(wx.Frame):
                 self.preview.update_drawing()
                 self.SetTitle("GCode Plot %s" % (os.path.basename(self.path)))
             except Exception as e:
-                err = e 
+                err = traceback.format_exc() 
             wx.SetCursor(normalCursor)
             if err is not None:
                 self.show_dialog("Could not open %s: %s" % (self.path, err))                                
@@ -404,6 +418,7 @@ class PreviewPanel(wx.Panel):
         dc.SetBackground( wx.Brush("White") )
         dc.Clear()
         self._scale_dc(dc)
+        dc.SetBrush(wx.Brush(None, wx.TRANSPARENT))
         dc.SetPen(wx.Pen("DARKGREY", 4))
         dc.DrawRectangle(BED_X, BED_Y, BED_WIDTH, BED_HEIGHT)
         preview_renderer = DCRenderer(up_colour="LIGHTGREY", down_colour="BLACK")            

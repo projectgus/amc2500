@@ -49,6 +49,24 @@ class LinearCommand(BaseCommand):
     def get_distance(self):
         return math.hypot(self.fr_x-self.to_x, self.fr_y-self.to_y)
 
+class ArcCommand(LinearCommand):
+    def __init__(self, last_args, args, comments,cw):
+        LinearCommand.__init__(self, last_args, args, comments)
+        print args
+        self.cn_x = self.fr_x + args["I"]
+        self.cn_y = self.fr_y + args["J"]
+        self.cn_z = self.fr_z + args.get("K", 0)
+        self.cw = cw
+
+    def __repr__(self):
+        return "%s %s (%s,%s,%s) -> (%s,%s,%s) about (%s,%s, %s) F=%s (%s)"  % ( self.__class__.__name__,
+                                                            "Clockwise" if self.cw else "Counter Clockwise",
+                                                            self.fr_x, self.fr_y, self.fr_z,    
+                                                            self.to_x, self.to_y, self.to_z,
+                                                            self.cn_x, self.cn_y, self.cn_z,
+                                                            self.f, self.comment )
+
+
 class G00(LinearCommand):
     """ G00 - high speed move (slew) """
     def __init__(self, last_args, args, comments):
@@ -64,23 +82,19 @@ class G01(LinearCommand):
     def __repr__(self):
         return LinearCommand.__repr__(self)
         
-class G02(LinearCommand):
-    """ G02 - CW 2D circular move (using IJ params)
-    Currently implemented as a linear move!
-    """
+class G02(ArcCommand):
+    """ G02 - CW 2D circular move (using IJ params) """
     def __init__(self, last_args, args, comments):
-        LinearCommand.__init__(self, last_args, args, comments)
+        ArcCommand.__init__(self, last_args, args, comments, True)
     def __repr__(self):
-        return LinearCommand.__repr__(self)
+        return ArcCommand.__repr__(self)
 
-class G03(LinearCommand):
-    """ G03 - CCW 2D circular move (using IJ params)
-    Currently implemented as a linear move!
-    """
+class G03(ArcCommand):
+    """ G03 - CCW 2D circular move (using IJ params) """
     def __init__(self, last_args, args, comments):
-        LinearCommand.__init__(self, last_args, args, comments)
+        ArcCommand.__init__(self, last_args, args, comments, False)
     def __repr__(self):
-        return LinearCommand.__repr__(self)
+        return ArcCommand.__repr__(self)
 
 class G21(BaseCommand):
     """ G21 - set mm mode. this is all we support atm anyhow ;) """
@@ -199,7 +213,7 @@ def parse(filename):
 
 def get_cmd_arg_expr(with_tag):
     arg_tag = r"([A-Z])"
-    number_arg = r"(-?\d+(?:\.\d+))"
+    number_arg = r"(-?\d+\.?\d*)"
     expr_arg = r"(\[[^\]]+\])" # args can either be simple numbers (parse by regex) or expressions (parse by pyparsing)
     return r"(?:%s(?:%s|%s))" % (arg_tag if with_tag else "", number_arg, expr_arg)    
 

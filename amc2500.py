@@ -26,8 +26,8 @@ STEPS_PER_MM=(1/0.006350)
 MAX_RPM=5000
 MIN_RPM=1000
 
-MOVEABLE_WIDTH = (300 * STEPS_PER_MM) # rough, TODO: measure properly and update
-MOVEABLE_HEIGHT=MOVEABLE_WIDTH
+MOVEABLE_WIDTH = (431 * STEPS_PER_MM)
+MOVEABLE_HEIGHT= (390 * STEPS_PER_MM) 
 
 SHORT_TIMEOUT=0.5
 
@@ -153,7 +153,7 @@ class AMC2500:
             return
         self.cur_spindle_speed = rpm
         ss = 100.0 * (rpm - MIN_RPM)/(MAX_RPM - MIN_RPM)
-        self._write("SS%d" % round(ss))
+        self._write_pos("SS%d" % round(ss),10)
 
     def set_head_down(self, is_down):
         """
@@ -261,10 +261,13 @@ class AMC2500:
         if(int(i_s) == int(dx_s) and int(j_s) == int(dy_s)):
             return # sending (i,j) == (dx,dy) is likely to break the controller
 
-        arc_s = 32770*(math.atan2(-j_s,-i_s) - math.atan2(dy_s-j_s,dx_s-i_s))
+        theta1 = math.atan2(0-j_s,0-i_s)
+        theta2 = math.atan2(dy_s-j_s,dx_s-i_s)
+        print [theta1, theta2]
+        arc_s = 32770*(theta1 - theta2)
 
-        if( arc_s < 0 if cw else arc_s > 0 ):
-            arc_s *= -1
+        if( arc_s > 0 if cw else arc_s < 0 ):
+            arc_s = -arc_s
 
         return self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
             dx_s, dy_s, arc_s),180)
@@ -276,6 +279,18 @@ class AMC2500:
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
         (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
         return self.move_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s))
+
+    def arc_to(self, x, y, i, j, cw):
+        """
+        Move the axis to an absolute position x,y based on currently known position
+        """
+        (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
+        (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
+        (i_s, j_s) = self._units_to_steps(i), self._units_to_steps(j)        
+        (di_s, dj_s) = (i_s-self.pos[0], j_s-self.pos[1])
+        return self.arc_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s),
+                                self._steps_to_units(di_s), self._steps_to_units(dj_s),cw)
+
 
     def zero(self):
         """
@@ -417,6 +432,12 @@ class FakeSerial:
     def write(self, data):
         for line in data.split("\n"):
             move = re.search(_RE_DA, line)
+
+            # We treat arcs as moves too
+            if move is None:
+              move = re.search(_RE_CR, line)
+
+            print line
             if move is not None:
                 move = move.groupdict()
                 dx = int(move["x"])
@@ -437,7 +458,6 @@ class FakeSerial:
 
                 (dx, self.x, limit_x) = get_limit(dx, self.x, MOVEABLE_WIDTH)
                 (dy, self.y, limit_y) = get_limit(dy, self.y, MOVEABLE_HEIGHT)
-                    
                 if limit_x != 0:
                     self.buffer.insert(0, "LIX%s,%d,%d,0" % ("+" if limit_x > 0 else "-", dx, dy))
                 if limit_y != 0:
@@ -503,12 +523,25 @@ class AMCRenderer:
             self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
         if cmd.f is not None:
             self.controller.set_speed(cmd.f / 60)
+        else:
+            self.controller.set_speed(50)
         if cmd.to_x is not None and cmd.to_y is not None:
             self.controller.move_to(cmd.to_x, cmd.to_y)
         self.home = self.home and self.controller.limits == (-1,-1) # still on home?
         if self.controller.limits != (0,0) and not self.home:
             raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
 
+    @when(ArcCommand)
+    def render(self, cmd):
+        if cmd.to_z is not None:
+            self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
+        if cmd.f is not None:
+            self.controller.set_speed(cmd.f / 60)
+        if cmd.to_x is not None and cmd.to_y is not None:
+            self.controller.arc_to(cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y,cmd.cw)
+        self.home = self.home and self.controller.limits == (-1,-1) # still on home?
+        if self.controller.limits != (0,0) and not self.home:
+            raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
         
     @when(M3)
     def render(self, cmd):
@@ -520,8 +553,10 @@ class AMCRenderer:
 
 
 _RE_AXES=r"(?P<x>[-\d]+),(?P<y>[-\d]+),(?P<z>[-\d]+)"
+_RE_CIRC=r"(?P<i>[-\d]+),(?P<j>[-\d]+),(?P<k>[-\d]+)"
 _RE_OK = r"OK" + _RE_AXES
 _RE_DA = r"^DA" + _RE_AXES + "$"
+_RE_CR = r"^CR" + _RE_CIRC + "," + _RE_AXES +",[-\d]+$"
 _RE_LIMIT = r"LI(?P<axis>.)(?P<dir>.)," + _RE_AXES
 
 def ts():
