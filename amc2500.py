@@ -36,14 +36,12 @@ def central_angle_steps( i, j, x, y, cw ):
         theta1 = math.atan2(   - j,   - i)
         theta2 = math.atan2( y - j, x - i)
     else:
-        theta1 = math.atan2(   + j,   - i)
-        theta2 = math.atan2( y + j, x - i)
+        theta1 = math.atan2(     j,     i)
+        theta2 = math.atan2(-y + j,-x + i)
     
     central_angle = theta1-theta2
 
-    if central_angle < 0 :
-        central_angle += 2*math.pi
-    if not cw:
+    if central_angle < 0 if cw else central_angle > 0:
       central_angle = -central_angle
     
     return central_angle * 32770

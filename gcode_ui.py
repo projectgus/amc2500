@@ -79,9 +79,9 @@ class DCRenderer:
             return # just a Z movement
 
         if cmd.cw :
-            dc.DrawArc(cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y)
-        else:
             dc.DrawArc(cmd.to_x, cmd.to_y, cmd.fr_x, cmd.fr_y, cmd.cn_x, cmd.cn_y)
+        else:
+            dc.DrawArc(cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y)
 
     @when(M3)
     def render(self, cmd, dc, override_colour=None):
