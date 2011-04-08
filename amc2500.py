@@ -31,6 +31,25 @@ MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
 
 SHORT_TIMEOUT=0.5
 
+def central_angle_steps( i, j, x, y, cw ):
+    theta1=0
+    theta2=0
+    if cw:
+        theta1 = atan2(   - j,   - i)
+        theta2 = atan2( y - j, x - i)
+    else:
+        theta1 = atan2(   + j,   - i)
+        theta2 = atan2( y + j, x - i)
+    
+    central_angle = theta1-theta2
+
+    if central_angle < 0 :
+        central_angle += 2*pi
+    if not cw:
+      central_angle = -central_angle
+    
+    return central_angle * 32770
+
 
 class AMCError(EnvironmentError):
     """ Exception for anything that goes wrong from the controller"""
@@ -261,13 +280,7 @@ class AMC2500:
         if(int(i_s) == int(dx_s) and int(j_s) == int(dy_s)):
             return # sending (i,j) == (dx,dy) is likely to break the controller
 
-        theta1 = math.atan2(0-j_s,0-i_s)
-        theta2 = math.atan2(dy_s-j_s,dx_s-i_s)
-        print [theta1, theta2]
-        arc_s = 32770*(theta1 - theta2)
-
-        if( arc_s > 0 if cw else arc_s < 0 ):
-            arc_s = -arc_s
+       	arc_s = central_angle_steps(i_s, j_s, dx_s, dy_s, cw)
 
         return self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
             dx_s, dy_s, arc_s),180)
