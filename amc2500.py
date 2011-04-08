@@ -32,19 +32,17 @@ MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
 SHORT_TIMEOUT=0.5
 
 def central_angle_steps( i, j, x, y, cw ):
-    theta1=0
-    theta2=0
     if cw:
-        theta1 = atan2(   - j,   - i)
-        theta2 = atan2( y - j, x - i)
+        theta1 = math.atan2(   - j,   - i)
+        theta2 = math.atan2( y - j, x - i)
     else:
-        theta1 = atan2(   + j,   - i)
-        theta2 = atan2( y + j, x - i)
+        theta1 = math.atan2(   + j,   - i)
+        theta2 = math.atan2( y + j, x - i)
     
     central_angle = theta1-theta2
 
     if central_angle < 0 :
-        central_angle += 2*pi
+        central_angle += 2*math.pi
     if not cw:
       central_angle = -central_angle
     
