@@ -30,6 +30,12 @@ BED_WIDTH=271
 BED_X = 35
 BED_Y = 55
 
+# Flip Y coordinates. DC draws in screen coords, our y is in normal/machine coords. 
+def flip(coord):
+    return TOTAL_HEIGHT - coord
+
+
+
 @is_visitor
 class DCRenderer:
     """Renderer to take gcode commands and preview them onto a wxPython DC
@@ -67,7 +73,7 @@ class DCRenderer:
         dc.SetPen(wx.Pen(self.get_colour(override_colour), 1 if self.head else 0.2))
         if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
             return # just a Z movement
-        lines = [ [cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y] ]
+        lines = [ [cmd.fr_x, flip(cmd.fr_y), cmd.to_x, flip(cmd.to_y)] ]
         dc.DrawLineList(lines)
         
     @when(ArcCommand)
@@ -78,10 +84,10 @@ class DCRenderer:
         if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
             return # just a Z movement
 
-        if cmd.cw :
-            dc.DrawArc(cmd.to_x, cmd.to_y, cmd.fr_x, cmd.fr_y, cmd.cn_x, cmd.cn_y)
+        if not cmd.cw:
+            dc.DrawArc(cmd.to_x, flip(cmd.to_y), cmd.fr_x, flip(cmd.fr_y), cmd.cn_x, flip(cmd.cn_y))
         else:
-            dc.DrawArc(cmd.fr_x, cmd.fr_y, cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y)
+            dc.DrawArc(cmd.fr_x, flip(cmd.fr_y), cmd.to_x, flip(cmd.to_y), cmd.cn_x, flip(cmd.cn_y))
 
     @when(M3)
     def render(self, cmd, dc, override_colour=None):
@@ -420,7 +426,7 @@ class PreviewPanel(wx.Panel):
         self._scale_dc(dc)
         dc.SetBrush(wx.Brush(None, wx.TRANSPARENT))
         dc.SetPen(wx.Pen("DARKGREY", 4))
-        dc.DrawRectangle(BED_X, BED_Y, BED_WIDTH, BED_HEIGHT)
+        dc.DrawRectangle(BED_X, flip(BED_Y)-BED_HEIGHT, BED_WIDTH, BED_HEIGHT)
         preview_renderer = DCRenderer(up_colour="LIGHTGREY", down_colour="BLACK")            
         render_index = 0
         (commands, index) = self._command_cb() # callback gets all current commands, index point
