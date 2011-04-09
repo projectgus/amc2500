@@ -22,13 +22,16 @@ from threading import Thread
 # and the area inside that which corresponds to the bed
 
 # (reasonably accurate values atm)
-TOTAL_HEIGHT=390
-TOTAL_WIDTH=431
 
-BED_HEIGHT=322
-BED_WIDTH=271
-BED_X = 35
-BED_Y = 55
+# (remember these values are for the axes swapped in hardware, origin is bottom-left
+# with the machine's logo facing towards you, X axis goes right and Y axis goes away from you.
+TOTAL_HEIGHT=431
+TOTAL_WIDTH=390
+
+BED_HEIGHT=271
+BED_WIDTH=322
+BED_X = 0
+BED_Y = 35
 
 # Flip Y coordinates. DC draws in screen coords, our y is in normal/machine coords. 
 def flip(coord):
@@ -185,17 +188,15 @@ class GCodeFrame(wx.Frame):
             self.preview = PreviewPanel(panel, lambda:(self.commands, self.cur_index))            
 
             # layout
-            grid = wx.GridBagSizer(vgap=5,hgap=5 )
-            
-            grid.AddMany([
-                    (self.preview,           (0,0), (50,1), wx.EXPAND),
+            hbox = wx.BoxSizer(orient=wx.HORIZONTAL)            
+            ctrlbox = wx.BoxSizer(orient=wx.VERTICAL)
 
-                    (controls,              (0,1), (2,1), wx.EXPAND),
-                    (modes,                 (2,1), (2,2), wx.EXPAND),
-                    ])
-            grid.AddGrowableRow(2)
-            grid.AddGrowableCol(0)
-            panel.SetSizerAndFit(grid, wx.EXPAND)
+            hbox.Add(self.preview, 1, wx.ALL|wx.EXPAND,10)
+            
+            ctrlbox.Add(controls)
+            ctrlbox.Add(modes)
+            hbox.Add(ctrlbox)
+            panel.SetSizerAndFit(hbox, wx.EXPAND)
             
             if load_path is not None:
                 wx.CallAfter(self.load_gcode_file, load_path)
@@ -414,6 +415,7 @@ class PreviewPanel(wx.Panel):
     # internal methods follow
 
     def _scale_dc(self, dc):
+        print self.Size
         sx = float(self.Size.width) / TOTAL_WIDTH
         sy = float(self.Size.height) / TOTAL_HEIGHT
         scale = min(sx, sy)

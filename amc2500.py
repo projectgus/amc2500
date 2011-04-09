@@ -1,6 +1,12 @@
 # Python module for control of AMC2500 CNC engraver controller. 
 # Very rough, made by reverse-engineering controller commands.
 #
+# NB: X & Y axes are swapped between the controller hardware and this
+# module.  This is because we find the AMC2500 lays out more
+# comfortably with the origin at the bottom-left, and the bed in
+# 'portrait' orientation.
+#
+#
 #  Copyright (C) 2011 Angus Gratton
 
 #   This program is free software; you can redistribute it and/or modify
@@ -31,17 +37,29 @@ MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
 
 SHORT_TIMEOUT=0.5
 
+# Function to calculate the "central angle" property of an
+# arc, which is passed to the controller.
+#
+# i,j is the centre of the circle - O
+# arc starts from the current position of the toolhead - A
+# x,y is the arc end position - B
+#
+# Returned value is the central angle angle AOB of this arc,
+# scaled via a mystery integer constant
+#
+# Note that because x,y axes are swapped between software and 
+# hardware, calculations also swap these axes.
 def central_angle_steps( i, j, x, y, cw ):
-    if cw:
-        theta1 = math.atan2(   - j,   - i)
-        theta2 = math.atan2( y - j, x - i)
+    if not cw:
+        theta1 = math.atan2(   - i,   - j)
+        theta2 = math.atan2( x - i, y - j)
     else:
-        theta1 = math.atan2(     j,     i)
-        theta2 = math.atan2(-y + j,-x + i)
+        theta1 = math.atan2(     i,     j)
+        theta2 = math.atan2(-x + i,-y + j)
     
     central_angle = theta1-theta2
 
-    if central_angle < 0 if cw else central_angle > 0:
+    if central_angle > 0 if cw else central_angle < 0:
       central_angle = -central_angle
     
     return central_angle * 32770
@@ -214,10 +232,10 @@ class AMC2500:
 
         if x != 0:
             self._write("VJ%d" % jog_speed)
-            self._write("JAX%s" % jog_dir(x))
+            self._write("JAY%s" % jog_dir(x)) # swapped hw axes
         if y != 0:
             self._write("VJ%d" % jog_speed)
-            self._write("JAY%s" % jog_dir(y))
+            self._write("JAX%s" % jog_dir(y)) # swapped hw axes
      
         self.jogging = True
         
@@ -252,8 +270,8 @@ class AMC2500:
             return # sending 0,0 breaks the controller
 
         # todo: calculate an appropriate timeout based on our known stepping rate
-        return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dx), 
-                                      self._units_to_steps(dy)), 180)
+        return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dy), 
+                                      self._units_to_steps(dx)), 180)
     
     def arc_by(self, dx, dy, i, j, cw):
         """
@@ -278,8 +296,8 @@ class AMC2500:
 
        	arc_s = central_angle_steps(i_s, j_s, dx_s, dy_s, cw)
 
-        return self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (i_s, j_s, 
-            dx_s, dy_s, arc_s),180)
+        return self._write_pos("CR%d,%d,0,%d,%d,0,%d\nGO" % (j_s, i_s, 
+            dy_s, dx_s, arc_s),180)
 
     def move_to(self, x, y):
         """
@@ -399,14 +417,14 @@ class AMC2500:
                 vals = re.search(_RE_LIMIT, l)                
             if vals is not None:
                 vals = vals.groupdict()
-                dpos = (int(vals["x"]), int(vals["y"]))
+                dpos = (int(vals["y"]), int(vals["x"])) # axes swapped fr h/w
                 self._debug("Moved by %d,%d steps" % dpos)
                 self.pos = (self.pos[0]+dpos[0], self.pos[1]+dpos[1])
                 if "axis" in vals: 
                     ld = 1 if vals["dir"] == "+" else -1
-                    if vals["axis"] == "X":
+                    if vals["axis"] == "Y": # axes swapped from h/w, so X
                         self.limits = (ld, self.limits[1])
-                    elif vals["axis"] == "Y":
+                    elif vals["axis"] == "X": # Y
                         self.limits = (self.limits[0], ld)                    
                     self._debug("At limits (%d,%d)" % self.limits)
         return (self._steps_to_units(dpos[0]), self._steps_to_units(dpos[1]))
