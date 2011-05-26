@@ -87,7 +87,7 @@ class DCRenderer:
         if cmd.to_x == cmd.fr_x and cmd.to_y == cmd.fr_y:
             return # just a Z movement
 
-        if not cmd.cw:
+        if cmd.cw:
             dc.DrawArc(cmd.to_x, flip(cmd.to_y), cmd.fr_x, flip(cmd.fr_y), cmd.cn_x, flip(cmd.cn_y))
         else:
             dc.DrawArc(cmd.fr_x, flip(cmd.fr_y), cmd.to_x, flip(cmd.to_y), cmd.cn_x, flip(cmd.cn_y))
