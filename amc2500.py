@@ -144,10 +144,14 @@ class AMC2500:
     def set_speed(self, speed):    
         """ Set head speed (units/second for the currently set unit)
         
-        Two unknown commands here - VSxxx & ATxx
-        
-        VM is definitely head speed, steps/second. Seems to apply whether motor is on
-        or off, head up or down. Others maybe acceleration? Apply in some other cases??
+        VM is the linear speed, when making linear moves, steps/second (linear distance)
+        VS is the arc speed, when making arc moves (steps/second around the circumference)
+        AT is acceleration/deceleration length, range seems to be:
+        -20 (full slow acceleration) to 
+        1 (no acceleration) to
+        20 (full acceleration)
+
+        (No idea what that's about) Some observed values:
 
         When moving quick
         VS1000
@@ -167,9 +171,9 @@ class AMC2500:
         if steps_per_second == self.cur_step_speed:
             return
         self.cur_step_speed = steps_per_second
-        self._write("VS%d" % (steps_per_second / 4)) ## ???                
+        self._write("VS%d" % steps_per_second) ## ???                
         self._write("VM%d" % steps_per_second)
-        self._write("AT%d" % (20 if steps_per_second > 1000 else 10)) ## ??
+        self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
 
     def set_spindle_speed(self, rpm):
         """
@@ -384,7 +388,7 @@ class AMC2500:
             print "%s W %s" % (ts(), cmd)
         if response_timeout_s is None:
             time.sleep(CMD_SLEEP)
-        if response_timeout_s is not None:
+        else:
             ser = self.ser
             t = ser.timeout
             ser.timeout = response_timeout_s
@@ -492,7 +496,7 @@ class FakeSerial:
                 if limit_x == 0 and limit_y == 0:
                     self.buffer.insert(0, "OK%d,%d,0" % (dx, dy))
             elif line == "IM": # init command
-                self.buffer.insert(0, "ES0,0,0") # <-- don't know what this is
+                self.buffer.insert(0, "ES0,0,0") # emergency stop
                 self.buffer.insert(1, "")
             elif re.search(r"^EO.$", line) is not None: # echo on/off
                 self.buffer.insert(0, "echo off")                
