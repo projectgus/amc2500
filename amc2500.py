@@ -108,7 +108,7 @@ class AMC2500:
         self._debug("Initialising controller on %s..." % port)
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
         self._write("EO0", SHORT_TIMEOUT)
-        self.set_speed(4000)
+        self.set_speed(1000, True)
 
 
     def _get_serial(self, port):
@@ -141,7 +141,7 @@ class AMC2500:
         """
         return self._steps_to_units(self.pos)
 
-    def set_speed(self, speed):    
+    def set_speed(self, speed, force_redundant_set=False):    
         """ Set head speed (units/second for the currently set unit)
         
         VM is the linear speed, when making linear moves, steps/second (linear distance)
@@ -168,9 +168,10 @@ class AMC2500:
         AT-7
         """
         steps_per_second = int(self._units_to_steps(speed))
-        if steps_per_second == self.cur_step_speed:
+        if self.cur_step_speed == steps_per_second and not force_redundant_set:
             return
-        self.cur_step_speed = steps_per_second
+        self.cur_step_speed = steps_per_second        
+        self.cur_speed = speed
         self._write("VS%d" % steps_per_second) ## ???                
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
@@ -180,7 +181,7 @@ class AMC2500:
         Set the spindle speed in rpm
         
         This one is internally a bit confusing, the jog dialog gives 1000rpm=0, 5000rpm=99
-        but the other UI says up to 24000rpm so maybe you can go above 99
+        (anything higher is an error)
         """
         if rpm > MAX_RPM:
             rpm = MAX_RPM
@@ -190,6 +191,7 @@ class AMC2500:
             return
         self.cur_spindle_speed = rpm
         ss = 100.0 * (rpm - MIN_RPM)/(MAX_RPM - MIN_RPM)
+        ss = min(99, max(ss, 0))
         self._write_pos("SS%d" % round(ss),10)
 
     def set_head_down(self, is_down):
@@ -341,7 +343,7 @@ class AMC2500:
         self.set_head_down(False)
         self.set_spindle(False)
         old_speed=self._steps_to_units(self.cur_step_speed)
-        fast=self._steps_to_units(8000)
+        fast=self._steps_to_units(2000)
         slow=self._steps_to_units(250)
         big=self._steps_to_units(80000)
         small=self._steps_to_units(1000)
@@ -371,6 +373,12 @@ class AMC2500:
         self._debug("Zeroing here (was %d,%d steps)" % self.pos)
         self.pos = (0,0)
 
+    def reinitialise(self):
+        self._debug("Reinitialising...")
+        self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
+        self._write("EO0", SHORT_TIMEOUT)
+        self.set_speed(self.cur_speed, True)
+
     def _error(self, msg):
         print "%s E %s" % (ts(), msg)
     
@@ -398,7 +406,11 @@ class AMC2500:
                 rsp.append(ln)
                 if self.trace:
                     print "%s R %s" % (ts(), ln)                
-                if not ln.startswith("OK"):
+                if ln.startswith("ER"):
+                    self._debug("Error State")
+                    self.reinitialise()
+                    raise AMCError("Controller Error: %s (command was %s)" % (ln[1:], cmd))
+                if not (ln.startswith("OK") or ln.startswith("ES")):
                     time.sleep(CMD_SLEEP)
                 if ser.inWaiting() > 0:
                         continue
@@ -415,16 +427,26 @@ class AMC2500:
         """
         rsp = self._write(cmd, response_timeout_s)
         dpos = (0,0)
-        for l in rsp:            
-            vals = re.search(_RE_OK, l)
+        for l in rsp:       
+            at_limits = False
+            #todo: parse this stuff properly
+            vals = re.search(_RE_ES, l)
+            emergency_stop = vals is not None            
             if vals is None:
                 vals = re.search(_RE_LIMIT, l)                
+                at_limits = vals is not None
+            if vals is None:
+                vals = re.search(_RE_OK, l)
             if vals is not None:
                 vals = vals.groupdict()
                 dpos = (int(vals["y"]), int(vals["x"])) # axes swapped fr h/w
                 self._debug("Moved by %d,%d steps" % dpos)
                 self.pos = (self.pos[0]+dpos[0], self.pos[1]+dpos[1])
-                if "axis" in vals: 
+                if emergency_stop:
+                    self._debug("Emergency Stop")
+                    self.reinitialise()
+                    raise AMCError("Emergency Stop button was pushed")                     
+                if at_limits:
                     ld = 1 if vals["dir"] == "+" else -1
                     if vals["axis"] == "Y": # axes swapped from h/w, so X
                         self.limits = (ld, self.limits[1])
@@ -555,7 +577,7 @@ class AMCRenderer:
         if cmd.f is not None:
             self.controller.set_speed(cmd.f / 60)
         else:
-            self.controller.set_speed(50)
+            self.controller.set_speed(10)
         if cmd.to_x is not None and cmd.to_y is not None:
             self.controller.move_to(cmd.to_x, cmd.to_y)
         self.home = self.home and self.controller.limits == (-1,-1) # still on home?
@@ -586,6 +608,7 @@ class AMCRenderer:
 _RE_AXES=r"(?P<x>[-\d]+),(?P<y>[-\d]+),(?P<z>[-\d]+)"
 _RE_CIRC=r"(?P<i>[-\d]+),(?P<j>[-\d]+),(?P<k>[-\d]+)"
 _RE_OK = r"OK" + _RE_AXES
+_RE_ES = r"ES" + _RE_AXES
 _RE_DA = r"^DA" + _RE_AXES + "$"
 _RE_CR = r"^CR" + _RE_CIRC + "," + _RE_AXES +",[-\d]+$"
 _RE_LIMIT = r"LI(?P<axis>.)(?P<dir>.)," + _RE_AXES

@@ -158,7 +158,6 @@ class WorkerThread(Thread):
         except Exception as e:
             traceback.print_exc()
             wx.PostEvent(self._window, EngravingDoneEvent(e))
-            controller.zero()
  
     def abort(self):
         self._aborting = True
