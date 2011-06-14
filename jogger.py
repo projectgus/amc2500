@@ -150,7 +150,7 @@ class PreviewPanel(wx.Panel):
         def OnClick(self,event):
           pos = (460-event.GetPosition()[1],event.GetPosition()[0]-55)
           coords = map(lambda a: int(a*STEPS_PER_MM), pos)
-          self.parent.controller.move_to(coords[0],coords[1])
+          self.parent.controller.move_to(coords[1],coords[0])
           self.parent.UpdateStatus()
           event.Skip()
 
@@ -213,13 +213,13 @@ class MainFrame(wx.Frame):
     direction = e.GetEventObject().GetLabel()
     if(self.controller):
       if direction == 'N':
-        self.controller.jog( 1, 0)
-      elif direction == 'W':
-        self.controller.jog( 0,-1)
-      elif direction == 'E':
         self.controller.jog( 0, 1)
-      elif direction == 'S':
+      elif direction == 'W':
         self.controller.jog(-1, 0)
+      elif direction == 'E':
+        self.controller.jog( 1, 0)
+      elif direction == 'S':
+        self.controller.jog( 0,-1)
       self.statusBar.SetStatusText("Jogging %s" % direction)
     e.Skip()
 
