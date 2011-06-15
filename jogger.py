@@ -150,7 +150,8 @@ class PreviewPanel(wx.Panel):
         def OnClick(self,event):
           pos = (460-event.GetPosition()[1],event.GetPosition()[0]-55)
           coords = map(lambda a: int(a*STEPS_PER_MM), pos)
-          self.parent.controller.move_to(coords[1],coords[0])
+          if self.parent.controller:
+              self.parent.controller.move_to(coords[1],coords[0])
           self.parent.UpdateStatus()
           event.Skip()
 
