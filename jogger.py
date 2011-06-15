@@ -96,29 +96,17 @@ class ToolControlPanel(wx.Panel):
     self.parent = parent
   
     self.sizer = wx.BoxSizer(wx.VERTICAL)
-    self.sizer1 = wx.BoxSizer(wx.HORIZONTAL)
-    self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)
 
     self.buttons = []
 
-    self.buttons.append(wx.Button(self,-1,"HeadUp"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnHeadUp,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
+    self.buttons.append(wx.ToggleButton(self,-1,"Spindle"))
+    self.Bind(wx.EVT_TOGGLEBUTTON,self.parent.OnSpindle,self.buttons[-1])
+    self.sizer.Add(self.buttons[-1],1,wx.EXPAND)
 
-    self.buttons.append(wx.Button(self,-1,"HeadDown"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnHeadDown,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
+    self.buttons.append(wx.ToggleButton(self,-1,"Head"))
+    self.Bind(wx.EVT_TOGGLEBUTTON,self.parent.OnHead,self.buttons[-1])
+    self.sizer.Add(self.buttons[-1],1,wx.EXPAND)
 
-    self.buttons.append(wx.Button(self,-1,"SpindleOn"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnSpindleOn,self.buttons[-1])
-    self.sizer2.Add(self.buttons[-1],1,wx.EXPAND)
-
-    self.buttons.append(wx.Button(self,-1,"SpindleOff"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnSpindleOff,self.buttons[-1])
-    self.sizer2.Add(self.buttons[-1],1,wx.EXPAND)
-
-    self.sizer.Add(self.sizer1,1,wx.EXPAND)
-    self.sizer.Add(self.sizer2,1,wx.EXPAND)
     self.SetSizer(self.sizer)
     self.SetAutoLayout(1)
     self.sizer.Fit(self)
@@ -271,30 +259,16 @@ class MainFrame(wx.Frame):
     else:
       e.Skip()
 
-  def OnHeadUp(self,e):
+  def OnHead(self,e):
     if(self.controller):
-      self.controller.set_head_down(False)
+      self.controller.set_head_down(e.GetEventObject().GetValue())
       self.UpdateStatus()
     else:
       e.Skip()
 
-  def OnHeadDown(self,e):
+  def OnSpindle(self,e):
     if(self.controller):
-      self.controller.set_head_down(True)
-      self.UpdateStatus()
-    else:
-      e.Skip()
-
-  def OnSpindleOn(self,e):
-    if(self.controller):
-      self.controller.set_spindle(True)
-      self.UpdateStatus()
-    else:
-      e.Skip()
-
-  def OnSpindleOff(self,e):
-    if(self.controller):
-      self.controller.set_spindle(False)
+      self.controller.set_spindle(e.GetEventObject().GetValue())
       self.UpdateStatus()
     else:
       e.Skip()
