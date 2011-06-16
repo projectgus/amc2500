@@ -156,6 +156,12 @@ class ToolControlPanel(wx.Panel):
     self.Bind(wx.EVT_TOGGLEBUTTON,self.parent.OnSpindle,self.buttons[-1])
     self.sizer.Add(self.buttons[-1],1,wx.EXPAND)
 
+    self.sizer.Add(wx.StaticText(self,-1,"Spindle Speed"),0,wx.EXPAND)
+    spindlespeed = wx.Slider(self,-1)
+    spindlespeed.SetMax(99)
+    self.Bind(wx.EVT_SCROLL_CHANGED,self.parent.OnSpindleSpeed,spindlespeed)
+    self.sizer.Add(spindlespeed,0,wx.EXPAND)
+
     self.buttons.append(wx.ToggleButton(self,-1,"Head"))
     self.Bind(wx.EVT_TOGGLEBUTTON,self.parent.OnHead,self.buttons[-1])
     self.sizer.Add(self.buttons[-1],1,wx.EXPAND)
@@ -328,6 +334,14 @@ class MainFrame(wx.Frame):
   def OnSpindle(self,e):
     if(self.controller):
       self.controller.set_spindle(e.GetEventObject().GetValue())
+      self.UpdateStatus()
+    else:
+      e.Skip()
+
+  def OnSpindleSpeed(self,e):
+    print e.GetEventObject().GetValue()
+    if(self.controller):
+      self.controller.set_spindle_speed(e.GetEventObject().GetValue())
       self.UpdateStatus()
     else:
       e.Skip()
