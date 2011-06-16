@@ -348,7 +348,12 @@ class MainFrame(wx.Frame):
           )
       )
 
-app = wx.App(False)
-frame = MainFrame(None,"AMC2500 Jogger")
-app.MainLoop()
+def main():
+    app = wx.App(False)
+    frame = MainFrame(None,"AMC2500 Jogger")
+    app.MainLoop()
+    app.Destroy()
+
+if __name__ == "__main__":
+    main()
 
