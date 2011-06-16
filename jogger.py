@@ -215,11 +215,13 @@ class MainFrame(wx.Frame):
     filemenu = wx.Menu()
   
     connectItem = filemenu.Append(-1, "&Connect", "Connect to a machine")
+    simItem = filemenu.Append(-1, "&Simulator", "Connect to a faked machine")
     aboutItem = filemenu.Append(wx.ID_ABOUT, "&About", " Hacky McHacks to test AMC2500")
     filemenu.AppendSeparator()
     exitItem = filemenu.Append(wx.ID_EXIT, "E&xit", " SIGTERM")
 
     self.Bind(wx.EVT_MENU,self.OnConnect,connectItem)
+    self.Bind(wx.EVT_MENU,self.OnSim,simItem)
     self.Bind(wx.EVT_MENU,self.OnAbout,aboutItem)
     self.Bind(wx.EVT_MENU,self.OnExit,exitItem)
 
@@ -296,6 +298,9 @@ class MainFrame(wx.Frame):
     dlg = ConnectDialog( None, -1, "Connect an AMC2500 Controller" )
     dlg.ShowModal() # Show it
     dlg.Destroy() # finally destroy it when finished.
+
+  def OnSim(self,e):
+        self.controller = SimController()
 
   def OnAbout(self,e):
     dlg = wx.MessageDialog( 
