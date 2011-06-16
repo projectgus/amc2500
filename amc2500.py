@@ -29,8 +29,6 @@ from visitor import is_visitor, when
 from gcode import *
 
 STEPS_PER_MM=(1/0.006350)
-MAX_RPM=5000
-MIN_RPM=1000
 
 MOVEABLE_WIDTH = (431 * STEPS_PER_MM)
 MOVEABLE_HEIGHT= (390 * STEPS_PER_MM) 
@@ -103,7 +101,7 @@ class AMC2500:
         self.cur_step_speed = None # in steps/sec
         self.head_down = False # head down flag
         self.spindle = False # spindle on flag
-        self.cur_spindle_speed = -1 # in RPM        
+        self.cur_spindle_speed = -1 # in spindle power       
         self.set_units_steps()
         self._debug("Initialising controller on %s..." % port)
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
@@ -176,21 +174,19 @@ class AMC2500:
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
 
-    def set_spindle_speed(self, rpm):
+    def set_spindle_speed(self, ss):
         """
-        Set the spindle speed in rpm
+        Set the spindle speed
         
-        This one is internally a bit confusing, the jog dialog gives 1000rpm=0, 5000rpm=99
-        (anything higher is an error)
+        There are two spindles that are designed for this machine.
+        We have the slow spindle which runs from 1k to 5k. The fast spindle
+        is speced to 25k. Valid range is 0 to 99 and any passed value
+        will be clamped by this method.
+
         """
-        if rpm > MAX_RPM:
-            rpm = MAX_RPM
-        if rpm < MIN_RPM:
-            rpm = MIN_RPM
-        if self.cur_spindle_speed == rpm:
+        if self.cur_spindle_speed == ss:
             return
-        self.cur_spindle_speed = rpm
-        ss = 100.0 * (rpm - MIN_RPM)/(MAX_RPM - MIN_RPM)
+        self.cur_spindle_speed = ss
         ss = min(99, max(ss, 0))
         self._write_pos("SS%d" % round(ss),10)
 
