@@ -344,7 +344,6 @@ class MainFrame(wx.Frame):
       e.Skip()
 
   def OnSpindleSpeed(self,e):
-    print e.GetEventObject().GetValue()
     if(self.controller):
       self.controller.set_spindle_speed(e.GetEventObject().GetValue())
       self.UpdateStatus()
