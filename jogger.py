@@ -3,7 +3,60 @@ import re
 
 import wx
 
+import serial
+
 from amc2500 import *
+
+
+class ConnectDialog(wx.Dialog):
+    def __init__(self, parent, id, title):
+        wx.Dialog.__init__(self,parent,id,title,size=(250,100))
+        self.parent = parent
+        sizer = wx.GridSizer(3,2,5,5)
+        
+        self.port = wx.ComboBox( self, -1, choices = self.scan(),)
+        self.debug = wx.CheckBox(self,-1,'Debug');
+        self.trace = wx.CheckBox(self,-1,'Trace');
+        connect = wx.Button(self,-1,'Connect')
+        close = wx.Button(self,-1,'Close')
+        connect.Bind(wx.EVT_BUTTON,self.OnConnect,connect)
+        close.Bind(wx.EVT_BUTTON,self.OnClose,close)
+       
+        sizer.AddMany([
+            (wx.StaticText(self,-1,"Port:"),0,wx.EXPAND),
+            (self.port,0,wx.EXPAND),
+            (self.debug,0,wx.EXPAND),
+            (self.trace,0,wx.EXPAND),
+            (close,0,wx.EXPAND),
+            (connect,0,wx.EXPAND)
+        ])
+
+        self.SetSizer(sizer)
+
+    def OnConnect(self, event):
+        try:
+            self.parent.controller = AMC2500(
+                port = self.port.GetValue(),
+                debug = self.debug.GetValue(),
+                trace = self.trace.GetValue())
+            self.Close();
+        except:
+            wx.MessageBox('Connection Failed', 'Error')
+
+    def OnClose(self, event):
+        self.Close()
+
+    def scan(self):
+        available = []
+        for i in range(256):
+            try:
+                s = serial.Serial(i)
+                available.append( s.portstr )
+                s.close()   # explicit close 'cause of delayed GC in java
+            except serial.SerialException:
+                pass
+        return available
+
 
 class GotoXYPanel(wx.Panel):
   def __init__(self,parent):
@@ -96,29 +149,23 @@ class ToolControlPanel(wx.Panel):
     self.parent = parent
   
     self.sizer = wx.BoxSizer(wx.VERTICAL)
-    self.sizer1 = wx.BoxSizer(wx.HORIZONTAL)
-    self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)
 
     self.buttons = []
 
-    self.buttons.append(wx.Button(self,-1,"HeadUp"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnHeadUp,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
+    self.buttons.append(wx.ToggleButton(self,-1,"Spindle"))
+    self.Bind(wx.EVT_TOGGLEBUTTON,self.parent.OnSpindle,self.buttons[-1])
+    self.sizer.Add(self.buttons[-1],1,wx.EXPAND)
 
-    self.buttons.append(wx.Button(self,-1,"HeadDown"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnHeadDown,self.buttons[-1])
-    self.sizer1.Add(self.buttons[-1],1,wx.EXPAND)
+    self.sizer.Add(wx.StaticText(self,-1,"Spindle Speed"),0,wx.EXPAND)
+    spindlespeed = wx.Slider(self,-1)
+    spindlespeed.SetMax(99)
+    self.Bind(wx.EVT_SCROLL_CHANGED,self.parent.OnSpindleSpeed,spindlespeed)
+    self.sizer.Add(spindlespeed,0,wx.EXPAND)
 
-    self.buttons.append(wx.Button(self,-1,"SpindleOn"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnSpindleOn,self.buttons[-1])
-    self.sizer2.Add(self.buttons[-1],1,wx.EXPAND)
+    self.buttons.append(wx.ToggleButton(self,-1,"Head"))
+    self.Bind(wx.EVT_TOGGLEBUTTON,self.parent.OnHead,self.buttons[-1])
+    self.sizer.Add(self.buttons[-1],1,wx.EXPAND)
 
-    self.buttons.append(wx.Button(self,-1,"SpindleOff"))
-    self.Bind(wx.EVT_BUTTON,self.parent.OnSpindleOff,self.buttons[-1])
-    self.sizer2.Add(self.buttons[-1],1,wx.EXPAND)
-
-    self.sizer.Add(self.sizer1,1,wx.EXPAND)
-    self.sizer.Add(self.sizer2,1,wx.EXPAND)
     self.SetSizer(self.sizer)
     self.SetAutoLayout(1)
     self.sizer.Fit(self)
@@ -150,7 +197,8 @@ class PreviewPanel(wx.Panel):
         def OnClick(self,event):
           pos = (460-event.GetPosition()[1],event.GetPosition()[0]-55)
           coords = map(lambda a: int(a*STEPS_PER_MM), pos)
-          self.parent.controller.move_to(coords[1],coords[0])
+          if self.parent.controller:
+              self.parent.controller.move_to(coords[1],coords[0])
           self.parent.UpdateStatus()
           event.Skip()
 
@@ -158,8 +206,7 @@ class PreviewPanel(wx.Panel):
 class MainFrame(wx.Frame):
   def __init__(self,parent,title):
 
-    self.controller = AMC2500() # HACK! TODO: Connection dialog
-    #self.controller = False
+    self.controller = False
 
     wx.Frame.__init__(self,parent,title=title,size=(800,600))
     
@@ -167,10 +214,14 @@ class MainFrame(wx.Frame):
 
     filemenu = wx.Menu()
   
+    connectItem = filemenu.Append(-1, "&Connect", "Connect to a machine")
+    simItem = filemenu.Append(-1, "&Simulator", "Connect to a faked machine")
     aboutItem = filemenu.Append(wx.ID_ABOUT, "&About", " Hacky McHacks to test AMC2500")
     filemenu.AppendSeparator()
     exitItem = filemenu.Append(wx.ID_EXIT, "E&xit", " SIGTERM")
 
+    self.Bind(wx.EVT_MENU,self.OnConnect,connectItem)
+    self.Bind(wx.EVT_MENU,self.OnSim,simItem)
     self.Bind(wx.EVT_MENU,self.OnAbout,aboutItem)
     self.Bind(wx.EVT_MENU,self.OnExit,exitItem)
 
@@ -243,6 +294,14 @@ class MainFrame(wx.Frame):
       self.UpdateStatus()
     e.Skip()
 
+  def OnConnect(self,e):
+    dlg = ConnectDialog( None, -1, "Connect an AMC2500 Controller" )
+    dlg.ShowModal() # Show it
+    dlg.Destroy() # finally destroy it when finished.
+
+  def OnSim(self,e):
+        self.controller = SimController()
+
   def OnAbout(self,e):
     dlg = wx.MessageDialog( 
       self, 
@@ -270,30 +329,23 @@ class MainFrame(wx.Frame):
     else:
       e.Skip()
 
-  def OnHeadUp(self,e):
+  def OnHead(self,e):
     if(self.controller):
-      self.controller.set_head_down(False)
+      self.controller.set_head_down(e.GetEventObject().GetValue())
       self.UpdateStatus()
     else:
       e.Skip()
 
-  def OnHeadDown(self,e):
+  def OnSpindle(self,e):
     if(self.controller):
-      self.controller.set_head_down(True)
+      self.controller.set_spindle(e.GetEventObject().GetValue())
       self.UpdateStatus()
     else:
       e.Skip()
 
-  def OnSpindleOn(self,e):
+  def OnSpindleSpeed(self,e):
     if(self.controller):
-      self.controller.set_spindle(True)
-      self.UpdateStatus()
-    else:
-      e.Skip()
-
-  def OnSpindleOff(self,e):
-    if(self.controller):
-      self.controller.set_spindle(False)
+      self.controller.set_spindle_speed(e.GetEventObject().GetValue())
       self.UpdateStatus()
     else:
       e.Skip()
@@ -314,7 +366,12 @@ class MainFrame(wx.Frame):
           )
       )
 
-app = wx.App(False)
-frame = MainFrame(None,"AMC2500 Jogger")
-app.MainLoop()
+def main():
+    app = wx.App(False)
+    frame = MainFrame(None,"AMC2500 Jogger")
+    app.MainLoop()
+    app.Destroy()
+
+if __name__ == "__main__":
+    main()
 
