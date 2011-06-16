@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import re
-
+import traceback
 import wx
 
 import serial
@@ -40,8 +40,8 @@ class ConnectDialog(wx.Dialog):
                 debug = self.debug.GetValue(),
                 trace = self.trace.GetValue())
             self.Close();
-        except:
-            wx.MessageBox('Connection Failed', 'Error')
+        except Exception as e:
+            wx.MessageBox("Connection Failed\n" + traceback.format_exc(), 'Error')
 
     def OnClose(self, event):
         self.Close()
@@ -295,7 +295,7 @@ class MainFrame(wx.Frame):
     e.Skip()
 
   def OnConnect(self,e):
-    dlg = ConnectDialog( None, -1, "Connect an AMC2500 Controller" )
+    dlg = ConnectDialog( self, -1, "Connect an AMC2500 Controller" )
     dlg.ShowModal() # Show it
     dlg.Destroy() # finally destroy it when finished.
 
