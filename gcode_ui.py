@@ -144,7 +144,7 @@ class WorkerThread(Thread):
         try:             
             controller.zero()
             controller.set_units_mm()
-            controller.set_spindle_speed(5000)
+            controller.set_spindle_speed(self._window.sl_spindle.Value)
             
             for i in range(0, len(commands)):
                 if self._aborting:
@@ -183,6 +183,7 @@ class GCodeFrame(wx.Frame):
             self.disable_when_engraving = [ ]
             controls = self.get_control_buttons(panel)
             modes = self.get_mode_settings(panel)
+            spindle = self.get_spindle_settings(panel)
 
             self.preview = PreviewPanel(panel, lambda:(self.commands, self.cur_index))            
 
@@ -194,6 +195,7 @@ class GCodeFrame(wx.Frame):
             
             ctrlbox.Add(controls)
             ctrlbox.Add(modes)
+            ctrlbox.Add(spindle,0,wx.EXPAND)
             hbox.Add(ctrlbox)
             panel.SetSizerAndFit(hbox, wx.EXPAND)
             
@@ -233,7 +235,21 @@ class GCodeFrame(wx.Frame):
             box.Add(self.chk_headup)
             box.Add(self.chk_spindleoff)
             return box
-                               
+                       
+        def get_spindle_settings(self, panel):
+            self.sl_spindle = wx.Slider(panel,-1)
+            self.sl_spindle.Max = 99
+            self.sl_spindle.Value = 99
+            self.Bind(wx.EVT_SCROLL_CHANGED,self.on_spindle_speed_changed)
+            self.txt_spindle = wx.StaticText(panel,-1, label="99%")
+            
+            self.disable_when_engraving += [ self.sl_spindle ]
+
+            box = wx.StaticBoxSizer(wx.StaticBox(panel, label="Spindle Speed"), wx.VERTICAL)
+            box.Add(self.sl_spindle,0,wx.EXPAND)
+            box.Add(self.txt_spindle,0)
+            return box
+        
 
         def get_menu_bar(self):
             fil = wx.Menu()
@@ -352,7 +368,7 @@ class GCodeFrame(wx.Frame):
             self.engraving = False
             for c in self.disable_when_engraving:
                 c.Enabled = True
-            self.btn_stop.Enabled = False
+            self.btn_stop.Enabled = False            
             self.cur_index = None
                                          
         def on_stop(self, index):
@@ -360,6 +376,12 @@ class GCodeFrame(wx.Frame):
                 return
             self.worker.abort()            
             self.show_dialog("Engraving stopped early due to stop button.")
+            
+
+        def on_spindle_speed_changed(self, event):
+            speed = self.sl_spindle.Value
+            self.txt_spindle.Label = "%d%%" % (speed)
+            
             
         def show_dialog(self, msg):
                 dlg = wx.MessageDialog( 

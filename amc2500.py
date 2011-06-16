@@ -173,6 +173,7 @@ class AMC2500:
         self._write("VS%d" % steps_per_second) ## ???                
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
+        self.set_spindle_speed(self.cur_spindle_speed) # setting speed seems to reset this back to full speed
 
     def set_spindle_speed(self, ss):
         """
@@ -184,8 +185,6 @@ class AMC2500:
         will be clamped by this method.
 
         """
-        if self.cur_spindle_speed == ss:
-            return
         self.cur_spindle_speed = ss
         ss = min(99, max(ss, 0))
         self._write_pos("SS%d" % round(ss),10)
