@@ -450,8 +450,9 @@ class PreviewPanel(wx.Panel):
             return # No change in size, no need to redraw
         self._last_size = size
         width,height = size
-        self._buffer = wx.EmptyBitmap(width, height)
-        self.update_drawing()
+        if width != 0 and height != 0:
+            self._buffer = wx.EmptyBitmap(width, height)
+            self.update_drawing()
         
         
 

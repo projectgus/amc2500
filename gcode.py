@@ -49,6 +49,13 @@ class LinearCommand(BaseCommand):
     def get_distance(self):
         return math.hypot(self.fr_x-self.to_x, self.fr_y-self.to_y)
 
+class DwellCommand(BaseCommand):
+    def __init__(self, last_args, args, comments):
+        BaseCommand.__init__(self, last_args, args, comments)
+        self.p = args.get("P")
+    def __repr__(self):
+        return "%s (%s)"  % ( self.__class__.__name__, self.p)
+
 class ArcCommand(LinearCommand):
     def __init__(self, last_args, args, comments,cw):
         LinearCommand.__init__(self, last_args, args, comments)
@@ -96,12 +103,35 @@ class G03(ArcCommand):
     def __repr__(self):
         return ArcCommand.__repr__(self)
 
+class G04(DwellCommand):
+    """ G04 - Dwell time (P param) """
+    def __init__(self, last_args, args, comments):
+        DwellCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        return DwellCommand.__repr__(self)
+
 class G21(BaseCommand):
     """ G21 - set mm mode. this is all we support atm anyhow ;) """
     def __init__(self, last_args, args, comments):        
         BaseCommand.__init__(self, last_args, args, comments)
     def __repr__(self):
         return "G21"
+
+class G90(BaseCommand):
+    """ G90 - absolute cooords """
+    def __init__(self, last_args, args, comments):        
+        BaseCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        print "Ignoring G90\n"
+        return "G90"
+
+class M00(BaseCommand):
+    """ M00 - Pause for tool change """
+    def __init__(self, last_args, args, comments):        
+        BaseCommand.__init__(self, last_args, args, comments)
+    def __repr__(self):
+        print "OMG LOL change tool\n"
+        return "M00"
 
 class M2(BaseCommand):
     """ M2 - end of program """
@@ -147,9 +177,16 @@ def parse(filename):
                 "G01" : G01,
                 "G02" : G02,
                 "G03" : G03,
+                "G04" : G04,
                 "G21" : G21,
+                "G90" : G90, # Abs coords
+                "M00" : M00, # stop
+                "M30" : M00, # stop
                 "M2"  : M2,
+                "M02"  : M2,
                 "M3"  : M3,
+                "M03"  : M3,
+                "M05"  : M5, # alias
                 "M5"  : M5 }
 
     token_cmds = [ ]
