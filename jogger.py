@@ -3,7 +3,60 @@ import re
 
 import wx
 
+import serial
+
 from amc2500 import *
+
+
+class ConnectDialog(wx.Dialog):
+    def __init__(self, parent, id, title):
+        wx.Dialog.__init__(self,parent,id,title,size=(250,100))
+        self.parent = parent
+        sizer = wx.GridSizer(3,2,5,5)
+        
+        self.port = wx.ComboBox( self, -1, choices = self.scan(),)
+        self.debug = wx.CheckBox(self,-1,'Debug');
+        self.trace = wx.CheckBox(self,-1,'Trace');
+        connect = wx.Button(self,-1,'Connect')
+        close = wx.Button(self,-1,'Close')
+        connect.Bind(wx.EVT_BUTTON,self.OnConnect,connect)
+        close.Bind(wx.EVT_BUTTON,self.OnClose,close)
+       
+        sizer.AddMany([
+            (wx.StaticText(self,-1,"Port:"),0,wx.EXPAND),
+            (self.port,0,wx.EXPAND),
+            (self.debug,0,wx.EXPAND),
+            (self.trace,0,wx.EXPAND),
+            (close,0,wx.EXPAND),
+            (connect,0,wx.EXPAND)
+        ])
+
+        self.SetSizer(sizer)
+
+    def OnConnect(self, event):
+        try:
+            self.parent.controller = AMC2500(
+                port = self.port.GetValue(),
+                debug = self.debug.GetValue(),
+                trace = self.trace.GetValue())
+            self.Close();
+        except:
+            wx.MessageBox('Connection Failed', 'Error')
+
+    def OnClose(self, event):
+        self.Close()
+
+    def scan(self):
+        available = []
+        for i in range(256):
+            try:
+                s = serial.Serial(i)
+                available.append( s.portstr )
+                s.close()   # explicit close 'cause of delayed GC in java
+            except serial.SerialException:
+                pass
+        return available
+
 
 class GotoXYPanel(wx.Panel):
   def __init__(self,parent):
@@ -147,8 +200,7 @@ class PreviewPanel(wx.Panel):
 class MainFrame(wx.Frame):
   def __init__(self,parent,title):
 
-    self.controller = AMC2500() # HACK! TODO: Connection dialog
-    #self.controller = False
+    self.controller = False
 
     wx.Frame.__init__(self,parent,title=title,size=(800,600))
     
@@ -156,10 +208,12 @@ class MainFrame(wx.Frame):
 
     filemenu = wx.Menu()
   
+    connectItem = filemenu.Append(-1, "&Connect", "Connect to a machine")
     aboutItem = filemenu.Append(wx.ID_ABOUT, "&About", " Hacky McHacks to test AMC2500")
     filemenu.AppendSeparator()
     exitItem = filemenu.Append(wx.ID_EXIT, "E&xit", " SIGTERM")
 
+    self.Bind(wx.EVT_MENU,self.OnConnect,connectItem)
     self.Bind(wx.EVT_MENU,self.OnAbout,aboutItem)
     self.Bind(wx.EVT_MENU,self.OnExit,exitItem)
 
@@ -231,6 +285,11 @@ class MainFrame(wx.Frame):
       self.controller.stop_jog()
       self.UpdateStatus()
     e.Skip()
+
+  def OnConnect(self,e):
+    dlg = ConnectDialog( None, -1, "Connect an AMC2500 Controller" )
+    dlg.ShowModal() # Show it
+    dlg.Destroy() # finally destroy it when finished.
 
   def OnAbout(self,e):
     dlg = wx.MessageDialog( 
