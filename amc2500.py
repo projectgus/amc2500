@@ -591,6 +591,11 @@ class AMCRenderer:
         if self.controller.limits != (0,0) and not self.home:
             raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
         
+    @when(DwellCommand)
+    def render(self, cmd):
+        print("Sleeping %dms" % (cmd.p))
+        time.sleep(cmd.p / 1000)
+
     @when(M3)
     def render(self, cmd):
         self.controller.set_spindle(not self.keep_spindle_off)
