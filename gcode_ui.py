@@ -356,9 +356,10 @@ class GCodeFrame(wx.Frame):
             self.done_renderer.render(command, dc) # immediate to screen
 
             self.distance_travelled += command.get_distance()
+            dist_denom = self.total_distance*self.distance_travelled
             self.SetStatusText("%d/%d GCode commands complete, travelled %.2f/%.2f (%d%%)" %
                                (self.cur_index, len(self.commands), self.distance_travelled, 
-                                self.total_distance, 100.0/self.total_distance*self.distance_travelled))                                             
+                                self.total_distance, 100.0/dist_denom if dist_denom > 0 else 0))                                             
 
         def on_engraving_done(self, event):
             self.controller.set_head_down(False)
