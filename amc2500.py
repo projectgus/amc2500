@@ -211,6 +211,7 @@ class AMC2500:
             return
         self.spindle = spindle_on
         self._write("MO%d" % ( 1 if spindle_on else 0 ))
+        self.set_spindle_speed(self.cur_spindle_speed) # setting on seems to reset this back to full speed
 
     def jog(self, x, y, jog_speed=1000):
         """
