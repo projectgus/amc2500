@@ -21,33 +21,39 @@ command = {
     'G94' : 'FEEDRATE_PER_MINUTE',
 }
 
-arguments = [ 'X','Y','Z', 'P' ]
-
 tokens = [
-    # Other tokens
-    'COMMENT',
     'ARGUMENT',
+    'NUMBER',
     'COMMAND',
-    ] + list(command.values()) + arguments
+    ]
+
+def t_ARGUMENT(t):
+    r'[XYZPF]'
+    t.lexer.argument = t.value
+    return t
 
 def t_COMMAND(t):
-    r'[GM][0-9]+'
-    t.type = command.get(t.value,'COMMAND')
+    r'[GMS]'
+    t.lexer.command = t.value
     return t
 
 def t_COMMENT(t):
-    r'\(([^\)])\)'
+    r'\(([^)]+)\)'
     pass
 
-def t_ARGUMENT(t):
-    r'[%s]-?[0-9\.]+' % ''.join(arguments)
-    t.type = t.value[0]
-    t.value = float(t.value[1:])
+def t_NUMBER(t):
+    r'-?[0-9]*\.?[0-9]+'
+    t.value = float(t.value) if "." in t.value else int(t.value)
     return t
 
 def t_newline(t):
     r'\n+'
     t.lexer.lineno += t.value.count("\n")
+    return None
+
+def t_whitespace(t):
+    r'[ \t]'
+    pass
 
 def t_error(t):
     print("Illegal character '%s'" % t.value[0])
@@ -55,30 +61,46 @@ def t_error(t):
 
 # Build the lexer
 import ply.lex as lex
-lex.lex()
+lexer = lex.lex()
 
 # Parsing rules
 
-#precedence = (
-#    ('left','PLUS','MINUS'),
-#    ('left','TIMES','DIVIDE'),
-#    ('right','UMINUS'),
-#    )
+precedence = (
+    ('left', 'NUMBER'),
+    ('left','ARGUMENT'),
+    ('left','COMMAND'),
+)
 
 # dictionary of names
 names = { }
 
-def p_statement_command(t):
-    'statement : COMMAND arguments'
-    names[t[1]] = t[3]
+def p_statements_statement_noterm(t):
+    'statements : statement statements'
+    t[0] = [ t[1] ] + t[2]
 
-def p_argument_arguments(t):
-    'arguments : 
+def p_statements_statement_term(t):
+    'statements : statement'
+    t[0] = [ t[1] ]
 
-def p_statement_expr(t):
-    'statement : expression'
-    print(t[1])
+def p_statement_command_args(t):
+    'statement : COMMAND NUMBER arguments'
+    t[0] = (t.lexer.command, t[2], t[3])
+
+def p_statement_command_noargs(t):
+    'statement : COMMAND NUMBER'
+    t[0] = (t.lexer.command, t[2])
+
+def p_arguments_argument_cont(t):
+    'arguments : ARGUMENT NUMBER arguments'
+    t[0] = [ (t[1], t[2]) ] + t[3]
+
+def p_argumentlines_argument_term(t):
+    'arguments : ARGUMENT NUMBER'
+    t[0] = [ (t[1], t[2]) ]
+
+def p_error(p):
+    print "Syntax error in input! %s" % p
 
 
 import ply.yacc as yacc
-yacc.yacc()
+parser = yacc.yacc()
