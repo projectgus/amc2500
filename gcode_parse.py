@@ -6,6 +6,8 @@
 
 # Tokens
 
+import itertools
+
 command = {
     'G00' : 'RAPID_MOVE',
     'G01' : 'LINEAR_MOVE',
@@ -28,13 +30,12 @@ tokens = [
     ]
 
 def t_ARGUMENT(t):
-    r'[XYZPF]'
-    t.lexer.argument = t.value
+    r'([XYZPF])(-?[0-9]*\.?[0-9]+)'
+    t.value = (t.lexer.lexmatch.group(2), float(t.lexer.lexmatch.group(3)))
     return t
 
 def t_COMMAND(t):
-    r'[GMS]'
-    t.lexer.command = t.value
+    r'[GMS][0-9]+'
     return t
 
 def t_COMMENT(t):
@@ -63,44 +64,18 @@ def t_error(t):
 import ply.lex as lex
 lexer = lex.lex()
 
-# Parsing rules
-
-precedence = (
-    ('left', 'NUMBER'),
-    ('left','ARGUMENT'),
-    ('left','COMMAND'),
-)
-
-# dictionary of names
-names = { }
-
-def p_statements_statement_noterm(t):
-    'statements : statement statements'
-    t[0] = [ t[1] ] + t[2]
-
-def p_statements_statement_term(t):
-    'statements : statement'
-    t[0] = [ t[1] ]
-
-def p_statement_command_args(t):
-    'statement : COMMAND NUMBER arguments'
-    t[0] = (t.lexer.command, t[2], t[3])
-
-def p_statement_command_noargs(t):
-    'statement : COMMAND NUMBER'
-    t[0] = (t.lexer.command, t[2])
-
-def p_arguments_argument_cont(t):
-    'arguments : ARGUMENT NUMBER arguments'
-    t[0] = [ (t[1], t[2]) ] + t[3]
-
-def p_argumentlines_argument_term(t):
-    'arguments : ARGUMENT NUMBER'
-    t[0] = [ (t[1], t[2]) ]
-
-def p_error(p):
-    print "Syntax error in input! %s" % p
-
-
-import ply.yacc as yacc
-parser = yacc.yacc()
+def parse(content):
+    lexer.input(content)
+    command = None
+    for tok in lexer:
+        if tok.type == "COMMAND":
+            if command:
+                yield command
+            command = { "name" : tok.value, "line" : tok.lexer.lineno }
+        elif tok.type == "ARGUMENT":
+            tag,value = tok.value
+            if tag in command:
+                yield command
+                command = { "name" : command["name"], "line" : tok.lexer.lineno }
+            else:
+                command[tag] = value

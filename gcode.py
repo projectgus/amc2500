@@ -22,7 +22,6 @@ class BaseCommand(object):
     def get_distance(self):
         """Returns the number of units spanned/travelled by this command"""
         return 0
-    
 
 class Comment(BaseCommand):
     def __init__(self, last_args, args, comments):
