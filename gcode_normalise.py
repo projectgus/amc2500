@@ -60,4 +60,8 @@ def normalise(commands):
         if command["name"] in [ "G00", "G01" ]:
             command["X"] = command["X"] - min_x
             command["Y"] = command["Y"] - min_y
+            # clamp values between min & max ranges, this should only apply for "toolpiece up" movements
+            # (keep them from zipping anywhere silly)
+            command["X"] = min(max(command["X"], 0), max_x-min_x)
+            command["Y"] = min(max(command["Y"], 0), max_y-min_y)
     return (max_x-min_x, max_y-min_y)
