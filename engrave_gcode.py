@@ -70,7 +70,8 @@ def jog_controller(controller):
         print
         print "HJKL to jog head around."
         print "0-9 to set jog speed."
-        print "D/U to move head Down/Up to check position"
+        print "D/U to move head Down/Up to check position."
+        print "S to toggle spindle power."
         print "O when found origin, Q to abort and quit."
         print
 
@@ -96,6 +97,8 @@ def jog_controller(controller):
                 controller.set_head_down(False)
                 speed = saved_speed
                 saved_speed = None
+            elif c == "s":
+                controller.set_spindle(not controller.spindle)
             elif c in ( "q", "o" ):
                 do_quit = (c == "q")
                 break
@@ -119,7 +122,7 @@ def engrave(controller, commands, head_up, no_spindle, verbose):
             controller.set_head_down(c["Z"] < 0 and not head_up)
             controller.move_to(c["X"], c["Y"])
         elif name in ( "M3", "M5" ): # spindle on/off
-            controller.set_spindle(c == "M3" and not no_spindle)
+            controller.set_spindle(name == "M3" and not no_spindle)
         elif name == "G04":
             time.sleep(c.get("P", 0))
         elif name.startswith("S"): # spindle speed... weird command format!
@@ -134,13 +137,12 @@ def engrave(controller, commands, head_up, no_spindle, verbose):
         elif name == "M2" : # program end
             print "Program End!"
             controller.set_head_down(False)
-            controller.set_spindle_on(False)
+            controller.set_spindle(False)
             controller.move_to(0,0)
         else:
             print "Ignoring unexpected command %s (line %d)" % (c["name"], c["line"])
         current += 1
-        message = "Command %d/%d" % (current, len(commands))
-        print message + "\b"*len(message+1) # will overwrite on next print statement
+        print "Command %d/%d" % (current, len(commands))
 
 if __name__ == "__main__":
     main()

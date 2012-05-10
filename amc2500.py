@@ -305,6 +305,7 @@ class AMC2500:
         """
         Move the axis to an absolute position x,y based on currently known position
         """
+        print "Moving to %.1f,%.1f" % (x,y)
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
         (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
         return self.move_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s))
