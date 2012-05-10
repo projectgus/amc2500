@@ -31,7 +31,7 @@ from gcode import *
 STEPS_PER_MM=(1/0.006350)
 
 MOVEABLE_WIDTH = (431 * STEPS_PER_MM)
-MOVEABLE_HEIGHT= (390 * STEPS_PER_MM) 
+MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
 
 SHORT_TIMEOUT=0.5
 
@@ -118,7 +118,7 @@ class AMC2500:
 
     def set_units_mm(self):
         self.set_units(STEPS_PER_MM)
-                
+
     def set_units_steps(self):
         self.set_units(1)
 
@@ -458,7 +458,7 @@ class SimController(AMC2500):
 
     Simulated at the serial port level, with a test stub serial port
     """
-    def __init__(self, 
+    def __init__(self,
                  port='/dev/ttyUSB0',
                  debug=True,
                  trace=True):
@@ -516,9 +516,11 @@ class FakeSerial:
             elif line == "IM": # init command
                 self.buffer.insert(0, "ES0,0,0") # emergency stop
                 self.buffer.insert(1, "")
-            elif re.search(r"^EO.$", line) is not None: # echo on/off
+            elif re.search(r"^SS[0-9]+", line): # spindle speed
+                self.buffer.insert(0, "OK")
+            elif re.search(r"^EO.$", line): # echo on/off
                 self.buffer.insert(0, "echo off")                
-            elif re.search(r"^H.$", line) is not None: # head up/down
+            elif re.search(r"^H.$", line): # head up/down
                 self.buffer.insert(0, "OK0,0,0")
             elif line in [ "VS0", "VM0", "AT0" ]:
                 raise AMCError("Cannot set a zero speed (bad command %s)" % line)
@@ -544,66 +546,6 @@ class FakeSerial:
 
     def inWaiting(self):
         return len("\n".join(self.buffer))
-
-
-@is_visitor
-class AMCRenderer:
-    """A renderer to take gcode commands (via gcode module) and send them to the controller
-    """
-    def __init__(self, controller, keep_spindle_off=False, keep_head_up=False):
-        """ Create a new renderer.
-        controller - controller instance to use
-        keep_spindle_off  - set to true to keep the spindle from running
-        keep_head_up      - set to true to keep the head up
-        """
-        self.controller = controller
-        self.keep_spindle_off = keep_spindle_off
-        self.keep_head_up = keep_head_up
-        self.home = True # assumed
-
-    @when(BaseCommand, allow_cascaded_calls=True)
-    def render(self, cmd):
-        if len(cmd.comment) > 0:
-            print "Comment: %s" % cmd.comment
-
-    @when(LinearCommand)
-    def render(self, cmd):
-        if cmd.to_z is not None:
-            self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
-        if cmd.f is not None:
-            self.controller.set_speed(cmd.f / 60)
-        else:
-            self.controller.set_speed(10)
-        if cmd.to_x is not None and cmd.to_y is not None:
-            self.controller.move_to(cmd.to_x, cmd.to_y)
-        self.home = self.home and self.controller.limits == (-1,-1) # still on home?
-        if self.controller.limits != (0,0) and not self.home:
-            raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
-
-    @when(ArcCommand)
-    def render(self, cmd):
-        if cmd.to_z is not None:
-            self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
-        if cmd.f is not None:
-            self.controller.set_speed(cmd.f / 60)
-        if cmd.to_x is not None and cmd.to_y is not None:
-            self.controller.arc_to(cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y,cmd.cw)
-        self.home = self.home and self.controller.limits == (-1,-1) # still on home?
-        if self.controller.limits != (0,0) and not self.home:
-            raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
-        
-    @when(DwellCommand)
-    def render(self, cmd):
-        print("Sleeping %dms" % (cmd.p))
-        time.sleep(cmd.p / 1000)
-
-    @when(M3)
-    def render(self, cmd):
-        self.controller.set_spindle(not self.keep_spindle_off)
-    @when(M5)
-    def render(self, cmd):
-        self.controller.set_spindle(False)
-
 
 
 _RE_AXES=r"(?P<x>[-\d]+),(?P<y>[-\d]+),(?P<z>[-\d]+)"

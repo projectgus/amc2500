@@ -6,76 +6,27 @@
 
 # Tokens
 
-import itertools
+import itertools, re
 
-command = {
-    'G00' : 'RAPID_MOVE',
-    'G01' : 'LINEAR_MOVE',
-#    'G02' : 'CLOCKWISE_MOVE',
-#    'G03' : 'COUNTER_CLOCKWISE_MOVE',
-    'G04' : 'DWELL',
-
-    'G20' : 'INCHES',
-    'G21' : 'MM',
-
-    'G90' : 'ABSOLUTE',
-    'G91' : 'RELATIVE',
-    'G94' : 'FEEDRATE_PER_MINUTE',
-}
-
-tokens = [
-    'ARGUMENT',
-    'NUMBER',
-    'COMMAND',
-    ]
-
-def t_ARGUMENT(t):
-    r'([XYZPF])(-?[0-9]*\.?[0-9]+)'
-    t.value = (t.lexer.lexmatch.group(2), float(t.lexer.lexmatch.group(3)))
-    return t
-
-def t_COMMAND(t):
-    r'[GMS][0-9]+'
-    return t
-
-def t_COMMENT(t):
-    r'\(([^)]+)\)'
-    pass
-
-def t_NUMBER(t):
-    r'-?[0-9]*\.?[0-9]+'
-    t.value = float(t.value) if "." in t.value else int(t.value)
-    return t
-
-def t_newline(t):
-    r'\n+'
-    t.lexer.lineno += t.value.count("\n")
-    return None
-
-def t_whitespace(t):
-    r'[ \t]'
-    pass
-
-def t_error(t):
-    print("Illegal character '%s'" % t.value[0])
-    t.lexer.skip(1)
-
-# Build the lexer
-import ply.lex as lex
-lexer = lex.lex()
+R_TOKEN = r"([A-Z])(-?[0-9]*.?[0-9]+)|(\([^)]*\))|(\n)"
+R_TOKEN = re.compile(R_TOKEN, re.MULTILINE)
 
 def parse(content):
-    lexer.input(content)
-    command = None
-    for tok in lexer:
-        if tok.type == "COMMAND":
-            if command:
-                yield command
-            command = { "name" : tok.value, "line" : tok.lexer.lineno }
-        elif tok.type == "ARGUMENT":
-            tag,value = tok.value
-            if tag in command:
-                yield command
-                command = { "name" : command["name"], "line" : tok.lexer.lineno }
+    command = { "line" : 1 }
+    for tok in R_TOKEN.finditer(content):
+        first_group = tok.group(1)
+        if first_group is None:
+            if tok.group(0) == "\n": # newline
+                if command and "name" in command:
+                    yield command
+                command = { "line" : command["line"]+1 }
+            else: # comment
+                pass
+        elif tok.group(2):
+            if first_group in ("G","M"):
+                command["name"] = tok.group(0)
             else:
-                command[tag] = value
+                if not "name" in command:
+                    command["name"] =  "G01" # default command
+                command[tok.group(1)] = float(tok.group(2))
+

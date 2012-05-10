@@ -34,6 +34,7 @@ def normalise(commands):
             command["name"] = "G90" # all absolute
         elif name in ( "G00", "G01" ):
             scalar = MM_PER_INCH if inches else 1
+            ox,oy = x,y
             if relative:
                 x += command.get("X", 0.0) * scalar
                 y += command.get("Y", 0.0) * scalar
@@ -42,7 +43,6 @@ def normalise(commands):
                 x = command.get("X", x/scalar) * scalar
                 y = command.get("Y", y/scalar) * scalar
                 z = command.get("Z", z/scalar) * scalar
-            # all absolute coords, all axes in all commands
             if "F" in command:
                 rate = command["F"] * scalar
             if rate:

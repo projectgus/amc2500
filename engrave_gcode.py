@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import getopt, sys, termios, tty, curses, re, time
-import gcode_parse, gcode_normalise
+import gcode_parse, gcode_normalise, gcode_simplify
 
 from amc2500 import AMC2500, SimController
 
