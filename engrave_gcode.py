@@ -42,7 +42,7 @@ def main():
                 try:
                     commands.append({"name" : "message", "value" : "Starting gcode file %s" % path })
                     if toolchange:
-                        commands += [ { "message" : "Tool change requested on command line..." },
+                        commands += [ { "name" : "message", "value" : "Tool change requested on command line..." },
                                       { "name" : "M6" }
                                       ]
                         toolchange = False
@@ -154,6 +154,24 @@ def engrave(controller, commands, args):
         controller.set_spindle(False)
         controller.move_to(0,0)
 
+    def tool_change(c):
+        """M6"""
+        controller.set_head_down(False)
+        controller.set_spindle(False)
+        old_units = controller.steps_per_unit
+        old_speed = controller.speed
+        controller.set_units_mm()
+        controller.set_speed(10)
+        old_pos = controller.get_pos()
+        while controller.move_by(0,-200) == (0,-200):
+            pass # drive the controller to the toolchange position, 200mm at a time
+        go = ""
+        while go != "GO":
+            go = raw_input("Type 'GO' and press enter to resume engraving once you've finished the toolchange")
+        controller.move_to(*old_pos)
+        controller.set_units(old_units)
+        controller.set_speed(old_speed)
+
     def ignore(c):
         pass
 
@@ -176,6 +194,7 @@ def engrave(controller, commands, args):
         "M2"  : finish_program,
         "M3" : lambda c: controller.set_spindle(not args.no_spindle),
         "M5" : lambda c: controller.set_spindle(False),
+        "M6" : tool_change,
         "M9" : ignore, # coolant off
         "S" : set_spindle_speed,
         "comment" : ignore,
