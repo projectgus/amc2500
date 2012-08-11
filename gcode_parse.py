@@ -8,25 +8,118 @@
 
 import itertools, re
 
-R_TOKEN = r"([A-Z])(-?[0-9]*.?[0-9]+)|(\([^)]*\))|(\n)"
-R_TOKEN = re.compile(R_TOKEN, re.MULTILINE)
+import ply.lex as lex
+
+class ParserException(Exception):
+    pass
+
+tokens = (
+   'COMMAND',
+   'SPINDLE_COMMAND',
+   'PARAM',
+   'COMMENT',
+   'newline',
+)
+
+def t_COMMAND(t):
+    r'[GMT][0-9]+'
+    while len(t.value) > 2 and t.value[1] == '0': # strip M06 to M6, and such
+        t.value = t.value[0] + t.value[2:]
+    return t
+
+def t_SPINDLE_COMMAND(t):
+    r'S[0-9]+'
+    t.value = int(t.value[1:])
+    return t
+
+def t_PARAM(t):
+    r'[XYZFP]-?([0-9]+\.)?[0-9]+'
+    t.value = (t.value[0],
+               float(t.value[1:]))
+    return t
+
+def t_COMMENT(t):
+    r'\(([^)]*)\)'
+    t.value = t.value[1:-1]
+    return t
+
+def t_newline(t):
+    r'\n+'
+    t.lexer.lineno += len(t.value)
+    return t
+
+t_ignore  = ' \t'
+
+def t_error(t):
+    print "Illegal character '%s' at line %d" % (t.value[0],
+                                                 t.lexer.lineno)
+    t.lexer.skip(1)
+
+lexer = lex.lex()
+
+# the sticky commands are the ones where the same command may be repeated on a new line without repeating the command tag
+STICKY_COMMANDS = [ "G1", "G81" ]
+
+
+class ParserCtx:
+    def __init__(self):
+        self.command = None
+        self.sticky_command = None
+
+def parse_command(ctx, tok):
+    ctx.command = { 'name' : tok.value,
+                'line' : tok.lineno,
+                }
+    if tok.value in STICKY_COMMANDS:
+        ctx.sticky_command = ctx.command
+
+def parse_spindle_command(ctx, tok):
+    ctx.command = { 'name' : 'S',
+                    'line' : tok.lineno,
+                    'S' : tok.value,
+                    }
+
+def parse_param(ctx, tok):
+    if ctx.command is None:
+        raise ParserException("Got parameter without a defined command on line %d" % tok.lineno)
+    ctx.command[tok.value[0]] = tok.value[1]
+    ctx.command['line'] = tok.lineno
+
+def parse_newline(ctx, tok):
+    old_command = ctx.command
+
+    try:
+        ctx.command = ctx.sticky_command.copy()
+    except AttributeError:
+        ctx.command = None
+
+    if old_command is not None:
+        return old_command
+
+def parse_comment(ctx,tok):
+    name = "message" if tok.value.startswith("MSG") else "comment"
+    return { "name" : name, "value" : tok.value.strip(), "line" : tok.lineno }
+
+PARSER_FUNCTIONS = {
+    "COMMAND" : parse_command,
+    "SPINDLE_COMMAND" : parse_spindle_command,
+    "PARAM" : parse_param,
+    "newline" : parse_newline,
+    "COMMENT" : parse_comment,
+    }
+
 
 def parse(content):
-    command = { "line" : 1 }
-    for tok in R_TOKEN.finditer(content):
-        first_group = tok.group(1)
-        if first_group is None:
-            if tok.group(0) == "\n": # newline
-                if command and "name" in command:
-                    yield command
-                command = { "line" : command["line"]+1 }
-            else: # comment
-                pass
-        elif tok.group(2):
-            if first_group in ("G","M"):
-                command["name"] = tok.group(0)
-            else:
-                if not "name" in command:
-                    command["name"] =  "G01" # default command
-                command[tok.group(1)] = float(tok.group(2))
+    lexer.input(content)
 
+    ctx = ParserCtx()
+    while True:
+        tok = lexer.token()
+        if tok is None:
+            return
+        try:
+            result = PARSER_FUNCTIONS[tok.type](ctx, tok)
+            if result is not None:
+                yield result
+        except KeyError:
+            raise ParserException("Unexpected token in stream: %s" % tok)

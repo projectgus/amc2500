@@ -25,10 +25,9 @@
 import datetime, re, time
 import serial
 import math
-from visitor import is_visitor, when
-from gcode import *
 
 STEPS_PER_MM=(1/0.006350)
+STEPS_PER_INCH=STEPS_PER_MM*2.54
 
 MOVEABLE_WIDTH = (431 * STEPS_PER_MM)
 MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
@@ -118,6 +117,10 @@ class AMC2500:
 
     def set_units_mm(self):
         self.set_units(STEPS_PER_MM)
+
+    def set_units_inches(self):
+        self.set_units(STEPS_PER_INCH)
+
 
     def set_units_steps(self):
         self.set_units(1)

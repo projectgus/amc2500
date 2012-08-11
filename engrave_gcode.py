@@ -1,63 +1,75 @@
 #!/usr/bin/env python
-import getopt, sys, termios, tty, curses, re, time
-import gcode_parse, gcode_normalise, gcode_simplify
+import argparse, sys, termios, tty, curses, re, time, itertools
+import gcode_parse
 
 from amc2500 import AMC2500, SimController
 
-def usage():
-    print "engrave_gcode [--no-spindle] [--head-up] [--no-jog|n] [--verbose|v] [--sim|s] gcode.ngc"
+parser = argparse.ArgumentParser(description='Engrave some gcode file(s) from the pcb2gcode package.')
+parser.add_argument('--sim', action='store_true',
+                    help="Testing option: simulation run only (no real engraver involved.)")
+parser.add_argument('--no-spindle', action='store_true',
+                    help='Testing option: keep the spindle motor off during the engraving pass.')
+parser.add_argument('--head-up', action='store_true',
+                    help='Testing option: keep the spindle head up during the engraving pass.')
+parser.add_argument('-', '--no-jog', action='store_true',
+                    help='Skip the "jog to find origin" step (use if the spindle head is already over the starting point.')
+parser.add_argument('-s', '--serial-port', default='/dev/ttyUSB0',
+                    help="Specify the serial port that the engraver is connected to.")
+parser.add_argument('-v', '--verbose', action='store_true',
+                    help="Verbose mode (print every command the engraver executes to stderr.")
+parser.add_argument('files', nargs='+', help="One or more gcode files, which will be sent to the engraver in the order given. Insert the phrase TC by itself between any two files where you want a toolchange run.")
+
+
+def header(path):
+    return [  ]
+
+
+
+def footer(path):
+    return [  ]
 
 def main():
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], "sdnv", ["sim", "head-up", "no-spindle", "no-jog", "verbose"])
-    except getopt.GetoptError, err:
-        print str(err)
-        usage()
-        sys.exit(2)
-    no_spindle = False
-    head_up = False
-    verbose = False
-    jog_first = True
-    simulate = False
-    try:
-        path = args[0]
-    except:
-        print "No gcode file specified"
-        usage()
-        sys.exit(2)
-    for o, a in opts:
-        verbose = verbose or o in ("--verbose", "v")
-        head_up = head_up or (o == "head-up")
-        no_spindle = no_spindle or (o == "no-spindle")
-        jog_first = jog_first and not o in ("--no-jog", "n")
-        simulate = simulate or o in ("-s", "--sim")
+    args = parser.parse_args()
 
-    print "Loading gcode file..."
-    with open(path) as f:
-        commands = list(gcode_parse.parse(f.read()))
-
-    print "Normalising gcode content..."
-    dimensions = gcode_normalise.normalise(commands)
-    print "Done. Engraved dimensions will be %.1f x %.1fmm" % dimensions
+    print "Loading gcode..."
+    commands = [ ]
+    toolchange = False
+    for path in args.files:
+        if path == "TC":
+            toolchange = True
+        else:
+            with open(path) as f:
+                try:
+                    commands.append({"name" : "message", "value" : "Starting gcode file %s" % path })
+                    if toolchange:
+                        commands += [ { "message" : "Tool change requested on command line..." },
+                                      { "name" : "M6" }
+                                      ]
+                        toolchange = False
+                    commands += list(gcode_parse.parse(f.read()))
+                    commands.append({"name" : "message", "value" : "End of gcode file %s" % path })
+                except gcode_parse.ParserException, err:
+                    print "Failed to parse %s: %s" % (path, err)
+                    sys.exit(1)
 
     print "Connecting to AMC controller..."
-    controller = SimController() if simulate else AMC2500()
-    controller.trace = verbose
-    controller.debug = verbose
+    controller = SimController() if args.sim else AMC2500(port=args.serial_port)
+    controller.trace = args.verbose
+    controller.debug = args.verbose
 
-    if jog_first:
+    if not args.no_jog:
         jog_controller(controller)
-    print "Ready to start. Controller should be above bottom-left corner of design."
-    print "This is %s." % ("a simulated run only" if simulate else
-                           "just a dry run (head up, no spindle.)" if (head_up and no_spindle) else
-                           "a run with the engraving head up" if head_up else
-                           "a run with the spindle off (CHECK NO TOOL IS INSTALLED)" if no_spindle else
+    print "Ready to start. Controller should be above origin of design."
+    print "This is %s." % ("a simulated run only" if args.sim else
+                           "just a dry run (head up, no spindle.)" if (args.head_up and args.no_spindle) else
+                           "a run with the engraving head up" if args.head_up else
+                           "a run with the spindle off (CHECK NO TOOL IS INSTALLED)" if args.no_spindle else
                            "NOT A DRY RUN SO BE SURE")
     print "Press Ctrl-C at any time to stop engraving."
     go = ""
     while go != "GO":
         go = raw_input("Type GO and press enter to start the engraving pass... ")
-    engrave(controller, commands, head_up, no_spindle, verbose)
+    engrave(controller, commands, args)
 
 
 def jog_controller(controller):
@@ -108,38 +120,74 @@ def jog_controller(controller):
         sys.exit(1)
 
 
-def engrave(controller, commands, head_up, no_spindle, verbose):
+def engrave(controller, commands, args):
     controller.zero_here()
     controller.set_units_mm()
     current = 0
+    args.absolute = False
+
+    def linear_move(c):
+        """G00, G01"""
+        if "F" in c:
+            controller.set_speed(float(c["F"])/60) # mm/min to mm/sec
+        if "Z" in c:
+            controller.set_head_down(c["Z"] < 0 and not args.head_up)
+        try:
+            if args.absolute:
+                controller.move_to(c["X"], c["Y"])
+            else:
+                controller.move_by(c["X"], c["Y"])
+        except KeyError:
+            pass
+
+    def set_spindle_speed(c):
+        """Sxxxxxxx"""
+        rpm = c["S"]
+        # 0-99 is the range for the controller's spindle arg,
+        # 24k is our max speed I think
+        controller.set_spindle_speed(rpm * 100 / 24000)
+
+    def finish_program(c):
+        """M2"""
+        print "Program End!"
+        controller.set_head_down(False)
+        controller.set_spindle(False)
+        controller.move_to(0,0)
+
+    def ignore(c):
+        pass
+
+    def message(c):
+        print c["value"]
+
+    def set_absolute(to):
+        args.absolute = to
+
+    ACTIONS = {
+        "G0" : linear_move,
+        "G1" : linear_move,
+        "G4" : lambda c: time.sleep(c.get("P",0)),
+        "G20" : lambda c: controller.set_units_inches(),
+        "G21" : lambda c: controller.set_units_mm(),
+        "G64" : ignore, # max deviation, ignore for now
+        "G90" : lambda c: set_absolute(True),
+        "G91" : lambda c: set_absolute(False),
+        "G94" : ignore, # units per minute feed rate (default)
+        "M2"  : finish_program,
+        "M3" : lambda c: controller.set_spindle(not args.no_spindle),
+        "M5" : lambda c: controller.set_spindle(False),
+        "M9" : ignore, # coolant off
+        "S" : set_spindle_speed,
+        "comment" : ignore,
+        "message" : message
+        }
+
     for c in commands:
-        if verbose:
-            print c
-        name = c["name"]
-        if name in ("G00", "G01"): # linear move
-            if "F" in c:
-                controller.set_speed(float(c["F"])/60) # mm/min to mm/sec
-            controller.set_head_down(c["Z"] < 0 and not head_up)
-            controller.move_to(c["X"], c["Y"])
-        elif name in ( "M3", "M5" ): # spindle on/off
-            controller.set_spindle(name == "M3" and not no_spindle)
-        elif name == "G04":
-            time.sleep(c.get("P", 0))
-        elif name.startswith("S"): # spindle speed... weird command format!
-            rpm = int(S[1:])
-            controller.set_spindle_speed(rpm * 100 / 24000) # 0-99 is the range for this arg, 24k is our max speed I think
-        elif name in ( "G20", "G90" ): # abs coords or mm, expected and ignorable
-            pass
-        elif name == "G64": # max deviation, ignoring for now...
-            pass
-        elif name in ("G94", "M9" ): # various commands we can ignore...
-            pass
-        elif name == "M2" : # program end
-            print "Program End!"
-            controller.set_head_down(False)
-            controller.set_spindle(False)
-            controller.move_to(0,0)
-        else:
+        if args.verbose:
+            sys.stderr.write("%s\n" % c)
+        try:
+            ACTIONS[c["name"]](c)
+        except KeyError:
             print "Ignoring unexpected command %s (line %d)" % (c["name"], c["line"])
         current += 1
         print "Command %d/%d" % (current, len(commands))
