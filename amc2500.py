@@ -26,8 +26,8 @@ import datetime, re, time
 import serial
 import math
 
-STEPS_PER_MM=(1/0.006350)
-STEPS_PER_INCH=STEPS_PER_MM*2.54
+STEPS_PER_INCH=4000 # steps are 4 thou
+STEPS_PER_MM=STEPS_PER_INCH/25.4
 
 MOVEABLE_WIDTH = (431 * STEPS_PER_MM)
 MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
