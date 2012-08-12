@@ -33,7 +33,7 @@ def t_SPINDLE_COMMAND(t):
     return t
 
 def t_PARAM(t):
-    r'[XYZFP]-?([0-9]+\.)?[0-9]+'
+    r'[XYZFPR]-?([0-9]+\.)?[0-9]+'
     t.value = (t.value[0],
                float(t.value[1:]))
     return t

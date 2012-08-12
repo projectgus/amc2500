@@ -175,6 +175,29 @@ def engrave(controller, commands, args):
         controller.set_units(old_units)
         controller.set_speed(old_speed)
 
+    def drill_cycle(c):
+        """G81/G82"""
+        controller.set_head_down(False)
+        controller.set_spindle(False)
+
+        # preliminary move
+        old_speed = controller.cur_speed
+        controller.set_max_speed() # may be too fast, check for skipped steps
+        if args.absolute:
+            controller.move_to(c["X"],c["Y"])
+        else:
+            controller.move_by(c["X"],c["Y"])
+        controller.set_speed(old_speed)
+
+        # drillify!
+        controller.set_spindle(not args.no_spindle)
+        controller.set_head_down(not args.head_up)
+        time.sleep(c.get("P",3)) # should maybe use R & Z here to calculate a dwell period for G81... ???
+
+        # done
+        controller.set_head_down(False)
+        controller.set_spindle(False)
+
     def ignore(c):
         pass
 
@@ -191,6 +214,8 @@ def engrave(controller, commands, args):
         "G20" : lambda c: controller.set_units_inches(),
         "G21" : lambda c: controller.set_units_mm(),
         "G64" : ignore, # max deviation, ignore for now
+        "G81" : drill_cycle,
+        "G82" : drill_cycle,
         "G90" : lambda c: set_absolute(True),
         "G91" : lambda c: set_absolute(False),
         "G94" : ignore, # units per minute feed rate (default)
