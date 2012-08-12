@@ -152,6 +152,7 @@ def engrave(controller, commands, args):
         print "Program End!"
         controller.set_head_down(False)
         controller.set_spindle(False)
+        controller.set_max_speed()
         controller.move_to(0,0)
 
     def tool_change(c):
@@ -159,12 +160,14 @@ def engrave(controller, commands, args):
         controller.set_head_down(False)
         controller.set_spindle(False)
         old_units = controller.steps_per_unit
-        old_speed = controller.speed
+        old_speed = controller.cur_speed
         controller.set_units_mm()
-        controller.set_speed(10)
+        controller.set_max_speed()
         old_pos = controller.get_pos()
-        while controller.move_by(0,-200) == (0,-200):
+        while controller.move_by(-200,0) == (-200,0):
             pass # drive the controller to the toolchange position, 200mm at a time
+        while controller.move_by(0,-200) == (0,-200):
+            pass
         go = ""
         while go != "GO":
             go = raw_input("Type 'GO' and press enter to resume engraving once you've finished the toolchange")
