@@ -51,9 +51,8 @@ def t_newline(t):
 t_ignore  = ' \t'
 
 def t_error(t):
-    print "Illegal character '%s' at line %d" % (t.value[0],
-                                                 t.lexer.lineno)
-    t.lexer.skip(1)
+    raise ParserException("Illegal character '%s' at line %d" % (t.value[0],
+                                                 t.lexer.lineno))
 
 lexer = lex.lex()
 
