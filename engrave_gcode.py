@@ -160,9 +160,8 @@ def engrave(controller, commands, args):
         controller.set_head_down(False)
         controller.set_spindle(False)
         old_units = controller.steps_per_unit
-        old_speed = controller.cur_speed
         controller.set_units_mm()
-        controller.set_max_speed()
+        old_speed = controller.set_max_speed()
         old_pos = controller.get_pos()
         while controller.move_by(-200,0) == (-200,0):
             pass # drive the controller to the toolchange position, 200mm at a time
@@ -172,8 +171,8 @@ def engrave(controller, commands, args):
         while go != "GO":
             go = raw_input("Type 'GO' and press enter to resume engraving once you've finished the toolchange")
         controller.move_to(*old_pos)
-        controller.set_units(old_units)
         controller.set_speed(old_speed)
+        controller.set_units(old_units)
 
     def drill_cycle(c):
         """G81/G82"""
@@ -181,8 +180,7 @@ def engrave(controller, commands, args):
         controller.set_spindle(False)
 
         # preliminary move
-        old_speed = controller.cur_speed
-        controller.set_max_speed() # may be too fast, check for skipped steps
+        old_speed = controller.set_max_speed() # may be too fast, check for skipped steps
         if args.absolute:
             controller.move_to(c["X"],c["Y"])
         else:

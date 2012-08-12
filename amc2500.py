@@ -97,7 +97,7 @@ class AMC2500:
         self.pos = (0,0)  # pos is always stored internally in steps
         self.limits = (0,0)
         self.jogging = False
-        self.cur_step_speed = None # in steps/sec
+        self.cur_step_speed = 1 # in steps/sec, gets set to real value by set_speed call at end of this function
         self.head_down = False # head down flag
         self.spindle = False # spindle on flag
         self.cur_spindle_speed = -1 # in spindle power       
@@ -107,13 +107,12 @@ class AMC2500:
         self._write("EO0", SHORT_TIMEOUT)
         self.set_speed(1000, True)
 
-
     def _get_serial(self, port):
         return serial.Serial(port=port, baudrate=9600)
 
     def set_units(self, steps_per_unit):
         self._debug("Setting units to %d steps/unit" % steps_per_unit)
-        self.steps_per_unit = steps_per_unit
+        self.steps_per_unit = float(steps_per_unit)
 
     def set_units_mm(self):
         self.set_units(STEPS_PER_MM)
@@ -129,30 +128,34 @@ class AMC2500:
     def _steps_to_units(self, steps):
         if isinstance(steps, tuple):
             return tuple([ self._steps_to_units(s) for s in list(steps) ])
-        return steps / self.steps_per_unit
+        return float(steps) / self.steps_per_unit
     def _units_to_steps(self, units):
         if isinstance(units, tuple):
             return tuple([ self._units_to_steps(u) for u in list(units) ])
-        return units * self.steps_per_unit
+        return int(float(units) * self.steps_per_unit)
 
-    
     def get_pos(self):
         """ Get the current (estimated) absolute position of the head
         in the currently set unit
         """
         return self._steps_to_units(self.pos)
 
+    def get_speed(self):
+        return self._steps_to_units(self.cur_step_speed)
+
     def set_max_speed(self):
         """ You can run as high as 4000steps/second but you miss steps """
-        self.set_speed(self._steps_to_units(1500))
+        return self.set_speed(self._steps_to_units(1500))
 
-    def set_speed(self, speed, force_redundant_set=False):    
+    def set_speed(self, speed, force_redundant_set=False):
         """ Set head speed (units/second for the currently set unit)
-        
+
+        Returns the old speed
+
         VM is the linear speed, when making linear moves, steps/second (linear distance)
         VS is the arc speed, when making arc moves (steps/second around the circumference)
         AT is acceleration/deceleration length, range seems to be:
-        -20 (full slow acceleration) to 
+        -20 (full slow acceleration) to
         1 (no acceleration) to
         20 (full acceleration)
 
@@ -172,20 +175,23 @@ class AMC2500:
         VM6
         AT-7
         """
-        steps_per_second = int(self._units_to_steps(speed))
+        if speed == 0:
+            raise AMCError("Cannot set speed to 0 units/second")
+        steps_per_second = max(self._units_to_steps(speed), 1)
+        old_speed = self._steps_to_units(self.cur_step_speed)
         if self.cur_step_speed == steps_per_second and not force_redundant_set:
-            return
-        self.cur_step_speed = steps_per_second        
-        self.cur_speed = speed
-        self._write("VS%d" % steps_per_second) ## ???                
+            return old_speed
+        self.cur_step_speed = steps_per_second
+        self._write("VS%d" % steps_per_second) ## ???
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
         self.set_spindle_speed(self.cur_spindle_speed) # setting speed seems to reset this back to full speed
+        return old_speed
 
     def set_spindle_speed(self, ss):
         """
         Set the spindle speed
-        
+
         There are two spindles that are designed for this machine.
         We have the slow spindle which runs from 1k to 5k. The fast spindle
         is speced to 25k. Valid range is 0 to 99 and any passed value
@@ -268,20 +274,24 @@ class AMC2500:
 
         If successful, returns the actual number of units moved as a tuple (dx,dy)
         """
-        if self.limits[0] != 0 and (dx * self.limits[0] < 0) :
-            self.limits = (0, self.limits[1])
-        if self.limits[1] != 0 and (dy * self.limits[1] < 0) :
-            self.limits = (self.limits[0], 0)
-      
         dx_s = self._units_to_steps(dx)
         dy_s = self._units_to_steps(dy)
-        if(int(dx_s) == 0 and int(dy_s) == 0):
+
+        return self._move_by_steps(dx_s, dy_s)
+
+    def _move_by_steps(self, dx_s, dy_s):
+        if dx_s == 0 and dy_s == 0:
             return # sending 0,0 breaks the controller
 
+        if self.limits[0] != 0 and (dx_s * self.limits[0] < 0) :
+            self.limits = (0, self.limits[1])
+        if self.limits[1] != 0 and (dy_s * self.limits[1] < 0) :
+            self.limits = (self.limits[0], 0)
+
         # todo: calculate an appropriate timeout based on our known stepping rate
-        return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dy), 
-                                      self._units_to_steps(dx)), 180)
-    
+        return self._write_pos("DA%d,%d,0\nGO" % (dy_s, dx_s), 180)
+
+
     def arc_by(self, dx, dy, i, j, cw):
         """
         Move by (dx,dy) units arcing around the circle centered at (i,j), Clockwise if CW else Counter Clockwise
@@ -294,13 +304,13 @@ class AMC2500:
         i_s = self._units_to_steps(i)
         j_s = self._units_to_steps(j)
 
-        if(int(dx_s) == 0 and int(dy_s) == 0):
+        if dx_s == 0 and dy_s == 0:
             return # sending 0,0 breaks the controller
 
-        if(int(i_s) == 0 and int(j_s) == 0):
+        if i_s == 0 and j_s == 0:
             return # sending 0,0 is likely to break the controller
 
-        if(int(i_s) == int(dx_s) and int(j_s) == int(dy_s)):
+        if i_s == dx_s and j_s == dy_s:
             return # sending (i,j) == (dx,dy) is likely to break the controller
 
        	arc_s = central_angle_steps(i_s, j_s, dx_s, dy_s, cw)
@@ -313,9 +323,9 @@ class AMC2500:
         Move the axis to an absolute position x,y based on currently known position
         """
         print "Moving to %.1f,%.1f" % (x,y)
-        (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
+        (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)
         (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
-        return self.move_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s))
+        return self._move_by_steps(dx_s,dy_s)
 
     def arc_to(self, x, y, i, j, cw):
         """
@@ -381,7 +391,7 @@ class AMC2500:
         self._debug("Reinitialising...")
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
         self._write("EO0", SHORT_TIMEOUT)
-        self.set_speed(self.cur_speed, True)
+        self.set_speed(self.get_speed(), True)
 
     def _error(self, msg):
         print "%s E %s" % (ts(), msg)
