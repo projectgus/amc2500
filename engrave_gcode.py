@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import argparse, sys, termios, tty, curses, re, time, itertools
+import argparse, sys, termios, tty, curses, re, time, itertools, select
 import gcode_parse
 
 from amc2500 import AMC2500, SimController
@@ -22,8 +22,6 @@ parser.add_argument('files', nargs='+', help="One or more gcode files, which wil
 
 def header(path):
     return [  ]
-
-
 
 def footer(path):
     return [  ]
@@ -72,53 +70,69 @@ def main():
     engrave(controller, commands, args)
 
 
-def jog_controller(controller):
-    do_quit = False
-    old_settings = termios.tcgetattr(sys.stdin)
-    controller.set_units_steps()
-    try:
-        tty.setcbreak(sys.stdin.fileno())
-        print "Jog the head around to find origin (bottom-left corner) for engraving."
-        print
-        print "HJKL to jog head around."
-        print "0-9 to set jog speed."
-        print "D/U to move head Down/Up to check position."
-        print "S to toggle spindle power."
-        print "O when found origin, Q to abort and quit."
-        print
+def _grabkey():
+    """ Grab a key from stdin once one is available, but also clear any pending keyboard
+    buffer to defeat keyboard repeat rate backing them up
 
-        speed = pow(2,5)
-        saved_speed = None
-        while True:
-            c = sys.stdin.read(1).lower()
-            if c == 'j':
-                controller.move_by(0,speed)
-            elif c == 'k':
-                controller.move_by(0, -speed)
-            elif c == 'h':
-                controller.move_by(-speed,0)
-            elif c == 'l':
-                controller.move_by(speed,0)
-            elif re.match("[0-9]", c):
-                speed = pow(2,ord(c) - ord("0"))
-            elif c == "d":
-                saved_speed = speed
-                speed = 0
-                controller.set_head_down(True)
-            elif c == "u" and saved_speed is not None:
-                controller.set_head_down(False)
-                speed = saved_speed
-                saved_speed = None
-            elif c == "s":
-                controller.set_spindle(not controller.spindle)
-            elif c in ( "q", "o" ):
-                do_quit = (c == "q")
-                break
+    In the case many characters are waiting in the stdin keyboard buffer, the last pressed
+    key is returned
+    """
+    old_settings = termios.tcgetattr(sys.stdin)
+    tty.setcbreak(sys.stdin.fileno())
+    try:
+        # call to select indicates if there is anything ready in stdin
+        #
+        # first call has timeout == None so blocks until something is ready,
+        # subsequent calls have timeout == 0 so only poll for more characters buffered
+        timeout = None
+        while len(select.select([sys.stdin], [], [], timeout)[0]) > 0:
+            result = sys.stdin.read(1)
+            timeout = 0
+        return result
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+def jog_controller(controller):
+    do_quit = False
+    controller.set_units_steps()
+    print "Jog the head around to find origin (bottom-left corner) for engraving."
+    print
+    print "HJKL to jog head around."
+    print "0-9 to set jog speed."
+    print "D/U to move head Down/Up to check position."
+    print "S to toggle spindle power."
+    print "O when found origin, Q to abort and quit."
+    print
+
+    speed = pow(2,5)
+    saved_speed = None
+    while True:
+        c = _grabkey().lower()
+        if c == 'j':
+            controller.move_by(0,speed)
+        elif c == 'k':
+            controller.move_by(0, -speed)
+        elif c == 'h':
+            controller.move_by(-speed,0)
+        elif c == 'l':
+            controller.move_by(speed,0)
+        elif re.match("[0-9]", c):
+            speed = pow(2,ord(c) - ord("0"))
+        elif c == "d":
+            saved_speed = speed
+            speed = 0
+            controller.set_head_down(True)
+        elif c == "u" and saved_speed is not None:
+            controller.set_head_down(False)
+            speed = saved_speed
+            saved_speed = None
+        elif c == "s":
+            controller.set_spindle(not controller.spindle)
+        elif c in ( "q", "o" ):
+            do_quit = (c == "q")
+            break
     if do_quit:
         sys.exit(1)
-
 
 def engrave(controller, commands, args):
     controller.zero_here()
