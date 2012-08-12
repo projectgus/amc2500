@@ -107,7 +107,10 @@ def jog_controller(controller):
     speed = pow(2,5)
     saved_speed = None
     jogging = False
-    old_units = controller.set_units_steps()
+    controller.set_head_down(False)
+    controller.set_spindle(False)
+    controller.save_state()
+    controller.set_units_steps()
     try:
         while True:
             rc = _grabkey()
@@ -157,20 +160,22 @@ def jog_controller(controller):
                     width = float(width)
                     if width <= 0 or width > 10:
                         raise ValueError()
-                    old_units = controller.set_units_mm()
-                    old_speed = controller.set_speed(0.3) # 0.3mm/sec for test pass
-                    controller.set_spindle(True)
-                    controller.set_head_down(True)
-                    controller.move_by(10, 0)
-                    controller.set_head_down(False)
-                    controller.move_by(0,width)
-                    controller.set_head_down(True)
-                    controller.move_by(-10, 0)
-                    controller.set_head_down(False)
-                    controller.set_spindle(False)
-                    controller.move_by(0,-width)
-                    controller.set_speed(old_speed)
-                    controller.set_units(old_units)
+                    controller.save_state()
+                    try:
+                        controller.set_units_mm()
+                        controller.set_speed(0.3) # 0.3mm/sec for test pass
+                        controller.set_spindle(True)
+                        controller.set_head_down(True)
+                        controller.move_by(10, 0)
+                        controller.set_head_down(False)
+                        controller.move_by(0,width)
+                        controller.set_head_down(True)
+                        controller.move_by(-10, 0)
+                        controller.set_head_down(False)
+                        controller.set_spindle(False)
+                        controller.move_by(0,-width)
+                    finally:
+                        controller.restore_state()
                     print "Finished the isolation width test"
                 except ValueError:
                     print "Invalid isolation width, going back to jogging..."
@@ -185,9 +190,7 @@ def jog_controller(controller):
         controller.set_spindle(False)
         sys.exit(1)
     finally:
-        controller.set_head_down(False)
-        controller.set_spindle(False)
-        controller.set_units(old_units)
+        controller.restore_state()
 
 def engrave(controller, commands, args):
     controller.zero_here()
@@ -229,9 +232,9 @@ def engrave(controller, commands, args):
         # move to the toolchange position
         controller.set_head_down(False)
         controller.set_spindle(False)
-        old_units = controller.set_units_mm()
-        old_speed = controller.set_max_speed()
-        old_pos = controller.get_pos()
+        controller.save_state()
+        controller.set_units_mm()
+        controller.set_max_speed()
         while controller.move_by(-200,0) == (-200,0):
             pass # drive the controller to the toolchange position, 200mm at a time
         while controller.move_by(0,-200) == (0,-200):
@@ -242,10 +245,7 @@ def engrave(controller, commands, args):
         jog_controller(controller)
 
         # go back to where we were
-        controller.set_max_speed()
-        controller.move_to(*old_pos)
-        controller.set_speed(old_speed)
-        controller.set_units(old_units)
+        controller.restore_state(True)
 
     def drill_cycle(c):
         """G81/G82"""
@@ -253,12 +253,13 @@ def engrave(controller, commands, args):
         controller.set_spindle(False)
 
         # preliminary move
-        old_speed = controller.set_max_speed() # may be too fast, check for skipped steps
+        controller.save_state()
+        controller.set_max_speed() # may be too fast, check for skipped steps
         if args.absolute:
             controller.move_to(c["X"],c["Y"])
         else:
             controller.move_by(c["X"],c["Y"])
-        controller.set_speed(old_speed)
+        controller.restore_state()
 
         # drillify!
         controller.set_spindle(not args.no_spindle)

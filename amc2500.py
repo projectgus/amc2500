@@ -25,6 +25,8 @@
 import datetime, re, time
 import serial
 import math
+import copy
+import collections
 
 STEPS_PER_INCH=4000 # steps are 4 thou
 STEPS_PER_MM=STEPS_PER_INCH/25.4
@@ -79,14 +81,13 @@ limits - these are the limits the controller thinks it has hit (X,Y) as 0,-1,1 f
 
 """
 class AMC2500:
-
     """
     Construct a new controller on the specified serial port
-    
+
     Set debug and/or trace if you want some info on stdout about 
     what the controller is doing.
     """
-    def __init__(self, 
+    def __init__(self,
                  port='/dev/ttyUSB0',
                  debug=True,
                  trace=True):
@@ -94,28 +95,64 @@ class AMC2500:
         self.ser.open()
         self.trace=trace
         self.debug=debug
-        self.pos = (0,0)  # pos is always stored internally in steps
         self.limits = (0,0)
         self.jogging = False
-        self.cur_step_speed = 1 # in steps/sec, gets set to real value by set_speed call at end of this function
-        self.steps_per_unit = 1 # gets set to real value by set_units_steps() call below
-        self.head_down = False # head down flag
-        self.spindle = False # spindle on flag
-        self.cur_spindle_speed = -1 # in spindle power 
+
+        # set up initial state as an anonymous object, so we can save/restore it later on
+        state = type("AMC2500_InternalState", (), {})()
+        state.cur_step_speed = 1
+        state.steps_per_unit = 1
+        state.head_down = False
+        state.spindle_on = False
+        state.spindle_speed = -1
+        state.pos = (0,0) # pos always stored in steps
+
+        self._states = [ state ]
+
         self.set_units_steps()
         self._debug("Initialising controller on %s..." % port)
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
         self._write("EO0", SHORT_TIMEOUT)
         self.set_speed(1000, True)
 
+    @property
+    def state(self):
+        return self._states[-1]
+
+    def save_state(self):
+        """
+        Save the current internal state & position on the controller
+        so we can restore to it later.
+
+        Saved states can be stacked and then restored later."""
+        self._states.append(copy.copy(self.state))
+
+    def restore_state(self, move_back=False):
+        """
+        Restore the last saved state of the controller.
+        Optionally move the controller back to its old position
+        (won't work if the controller has been zeroed since saving it.)
+        """
+        restore = self._states[-2]
+        self.set_units_steps()
+        self.set_head_down(False)
+        if move_back:
+            self.set_spindle(False)
+            self.set_max_speed()
+            self.move_to(*restore.pos)
+        self.set_speed(restore.cur_step_speed)
+        self.set_spindle_speed(restore.spindle_speed)
+        self.set_spindle(restore.spindle_on)
+        self.set_head_down(restore.head_down)
+        self.set_units(restore.steps_per_unit)
+        self._states.pop()
+
     def _get_serial(self, port):
         return serial.Serial(port=port, baudrate=9600)
 
     def set_units(self, steps_per_unit):
         self._debug("Setting units to %d steps/unit" % steps_per_unit)
-        old_units = self.steps_per_unit
-        self.steps_per_unit = float(steps_per_unit)
-        return old_units
+        self.state.steps_per_unit = float(steps_per_unit)
 
     def set_units_mm(self):
         return self.set_units(STEPS_PER_MM)
@@ -130,24 +167,24 @@ class AMC2500:
     def _steps_to_units(self, steps):
         if isinstance(steps, tuple):
             return tuple([ self._steps_to_units(s) for s in list(steps) ])
-        return float(steps) / self.steps_per_unit
+        return float(steps) / self.state.steps_per_unit
     def _units_to_steps(self, units):
         if isinstance(units, tuple):
             return tuple([ self._units_to_steps(u) for u in list(units) ])
-        return int(float(units) * self.steps_per_unit)
+        return int(float(units) * self.state.steps_per_unit)
 
     def get_pos(self):
         """ Get the current (estimated) absolute position of the head
         in the currently set unit
         """
-        return self._steps_to_units(self.pos)
+        return self._steps_to_units(self.state.pos)
 
     def get_speed(self):
-        return self._steps_to_units(self.cur_step_speed)
+        self._steps_to_units(self.state.cur_step_speed)
 
     def set_max_speed(self):
         """ You can run as high as 4000steps/second but you miss steps """
-        return self.set_speed(self._steps_to_units(1500))
+        self.set_speed(self._steps_to_units(1500))
 
     def set_speed(self, speed, force_redundant_set=False):
         """ Set head speed (units/second for the currently set unit)
@@ -180,15 +217,13 @@ class AMC2500:
         if speed == 0:
             raise AMCError("Cannot set speed to 0 units/second")
         steps_per_second = max(self._units_to_steps(speed), 1)
-        old_speed = self._steps_to_units(self.cur_step_speed)
-        if self.cur_step_speed == steps_per_second and not force_redundant_set:
-            return old_speed
-        self.cur_step_speed = steps_per_second
+        if self.state.cur_step_speed == steps_per_second and not force_redundant_set:
+            return
+        self.state.cur_step_speed = steps_per_second
         self._write("VS%d" % steps_per_second) ## ???
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
-        self.set_spindle_speed(self.cur_spindle_speed) # setting speed seems to reset this back to full speed
-        return old_speed
+        self.set_spindle_speed(self.state.spindle_speed) # setting speed seems to reset this back to full speed
 
     def set_spindle_speed(self, ss):
         """
@@ -200,8 +235,8 @@ class AMC2500:
         will be clamped by this method.
 
         """
-        changing_speed = (ss != self.cur_spindle_speed) and self.spindle
-        self.cur_spindle_speed = ss
+        changing_speed = (ss != self.state.spindle_speed) and self.state.spindle_on
+        self.state.spindle_speed = ss
         ss = min(99, max(ss, 0))
         self._write_pos("SS%d" % round(ss),10)
         if changing_speed:
@@ -215,10 +250,10 @@ class AMC2500:
         
         How up/down exact positions are determined is not yet known!
         """
-        if is_down == self.head_down:
+        if is_down == self.state.head_down:
             return
         res = self._write_pos("HD" if is_down else "HU", SHORT_TIMEOUT)
-        self.head_down = is_down
+        self.state.head_down = is_down
         time.sleep(0.3) # head movements not instant
         return res
 
@@ -226,11 +261,11 @@ class AMC2500:
         """
         Turn the spindle motor on/off as per the spindle_on paramether
         """        
-        if spindle_on == self.spindle:
+        if spindle_on == self.state.spindle_on:
             return
-        self.spindle = spindle_on
+        self.state.spindle_on = spindle_on
         self._write("MO%d" % ( 1 if spindle_on else 0 ))
-        self.set_spindle_speed(self.cur_spindle_speed) # setting on seems to reset this back to full speed
+        self.set_spindle_speed(self.state.spindle_speed) # setting on seems to reset this back to full speed
         time.sleep(0.3) # spindle takes time to spin up/down
 
     def jog(self, x, y, jog_speed=1000):
@@ -331,7 +366,7 @@ class AMC2500:
         """
         print "Moving to %.1f,%.1f" % (x,y)
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)
-        (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
+        (dx_s, dy_s) = (x_s-self.state.pos[0], y_s-self.state.pos[1])
         return self._move_by_steps(dx_s,dy_s)
 
     def arc_to(self, x, y, i, j, cw):
@@ -339,9 +374,9 @@ class AMC2500:
         Move the axis to an absolute position x,y based on currently known position
         """
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
-        (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
+        (dx_s, dy_s) = (x_s-self.state.pos[0], y_s-self.state.pos[1])
         (i_s, j_s) = self._units_to_steps(i), self._units_to_steps(j)        
-        (di_s, dj_s) = (i_s-self.pos[0], j_s-self.pos[1])
+        (di_s, dj_s) = (i_s-self.state.pos[0], j_s-self.state.pos[1])
         return self.arc_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s),
                                 self._steps_to_units(di_s), self._steps_to_units(dj_s),cw)
 
@@ -363,7 +398,7 @@ class AMC2500:
 
         self.set_head_down(False)
         self.set_spindle(False)
-        old_speed=self._steps_to_units(self.cur_step_speed)
+        self.save_state()
         fast=self._steps_to_units(2000)
         slow=self._steps_to_units(250)
         big=self._steps_to_units(80000)
@@ -385,14 +420,14 @@ class AMC2500:
         self.move_by(0,small if ly > 0 else -1*small)
         if self.limits[1] != ly:
             self._error("Failed to find Y limit %d, got limit value %d" % (ly, self.limits[1]))
-        self.set_speed(old_speed)
+        self.restore_state()
         if zero_there:
             self.zero_here()
 
     def zero_here(self):
         """Zero the head on the current coordinates without moving it"""
-        self._debug("Zeroing here (was %d,%d steps)" % self.pos)
-        self.pos = (0,0)
+        self._debug("Zeroing here (was %d,%d steps)" % self.state.pos)
+        self.state.pos = (0,0)
 
     def reinitialise(self):
         self._debug("Reinitialising...")
@@ -462,7 +497,7 @@ class AMC2500:
                 vals = vals.groupdict()
                 dpos = (int(vals["y"]), int(vals["x"])) # axes swapped fr h/w
                 self._debug("Moved by %d,%d steps" % dpos)
-                self.pos = (self.pos[0]+dpos[0], self.pos[1]+dpos[1])
+                self.state.pos = (self.state.pos[0]+dpos[0], self.state.pos[1]+dpos[1])
                 if emergency_stop:
                     self._debug("Emergency Stop")
                     self.reinitialise()
