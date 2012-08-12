@@ -94,12 +94,13 @@ def _grabkey():
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 def jog_controller(controller):
-    print "hjkl (no capitals) to nudge the head around."
-    print "0-9 to set the number of steps to nudge by (0 for 1 step, 1 for 2 steps, 9 for 512 steps.)"
     print "HJKL (capitals) to start continuous jog in a direction, any key to stop jogging."
+    print "hjkl (no capitals) to nudge the head around in a direction."
+    print "0-9 to set the number of steps to nudge by (0 for 1 step, 1 for 2 steps, 9 for 512 steps.)"
     print "D/U to move head Down/Up to check position or cut depth."
     print "S to toggle spindle power."
     print "QWERTY to set spindle speed 10% / 20% / 40% / 60% / 80% / 100%"
+    print "I to perform an isolation width test (two horizontal 1mm lines at & above the current point.)"
     print "Type ! when you're done"
     print
 
@@ -150,6 +151,29 @@ def jog_controller(controller):
             elif c in [ 'q','w','e','r','t','y' ]:
                 speed = { 'q':10, 'w':20, 'e':40, 'r':60, 't':80, 'y':99 }[c]
                 controller.set_spindle_speed(speed)
+            elif c == "i":
+                width = raw_input("Enter the isolation width to test in mm (engraver will make two parallel 10mm lines this far apart.)\n> ")
+                try:
+                    width = float(width)
+                    if width <= 0 or width > 10:
+                        raise ValueError()
+                    old_units = controller.set_units_mm()
+                    old_speed = controller.set_speed(0.3) # 0.3mm/sec for test pass
+                    controller.set_spindle(True)
+                    controller.set_head_down(True)
+                    controller.move_by(10, 0)
+                    controller.set_head_down(False)
+                    controller.move_by(0,width)
+                    controller.set_head_down(True)
+                    controller.move_by(-10, 0)
+                    controller.set_head_down(False)
+                    controller.set_spindle(False)
+                    controller.move_by(0,-width)
+                    controller.set_speed(old_speed)
+                    controller.set_units(old_units)
+                    print "Finished the isolation width test"
+                except ValueError:
+                    print "Invalid isolation width, going back to jogging..."
             elif c == "!":
                 return
             if jogging:
