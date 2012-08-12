@@ -56,6 +56,7 @@ def main():
     controller.debug = args.verbose
 
     if not args.no_jog:
+        print "Jog the controller to set up the initial pass. When done, tool should be over the origin point."
         jog_controller(controller)
     print "Ready to start. Controller should be above origin of design."
     print "This is %s." % ("a simulated run only" if args.sim else
@@ -93,46 +94,76 @@ def _grabkey():
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
 def jog_controller(controller):
-    do_quit = False
-    controller.set_units_steps()
-    print "Jog the head around to find origin (bottom-left corner) for engraving."
-    print
-    print "HJKL to jog head around."
-    print "0-9 to set jog speed."
-    print "D/U to move head Down/Up to check position."
+    print "hjkl (no capitals) to nudge the head around."
+    print "0-9 to set the number of steps to nudge by (0 for 1 step, 1 for 2 steps, 9 for 512 steps.)"
+    print "HJKL (capitals) to start continuous jog in a direction, any key to stop jogging."
+    print "D/U to move head Down/Up to check position or cut depth."
     print "S to toggle spindle power."
-    print "O when found origin, Q to abort and quit."
+    print "QWERTY to set spindle speed 10% / 20% / 40% / 60% / 80% / 100%"
+    print "Type ! when you're done"
     print
 
     speed = pow(2,5)
     saved_speed = None
-    while True:
-        c = _grabkey().lower()
-        if c == 'j':
-            controller.move_by(0,speed)
-        elif c == 'k':
-            controller.move_by(0, -speed)
-        elif c == 'h':
-            controller.move_by(-speed,0)
-        elif c == 'l':
-            controller.move_by(speed,0)
-        elif re.match("[0-9]", c):
-            speed = pow(2,ord(c) - ord("0"))
-        elif c == "d":
-            saved_speed = speed
-            speed = 0
-            controller.set_head_down(True)
-        elif c == "u" and saved_speed is not None:
-            controller.set_head_down(False)
-            speed = saved_speed
-            saved_speed = None
-        elif c == "s":
-            controller.set_spindle(not controller.spindle)
-        elif c in ( "q", "o" ):
-            do_quit = (c == "q")
-            break
-    if do_quit:
+    jogging = False
+    old_units = controller.set_units_steps()
+    try:
+        while True:
+            rc = _grabkey()
+            c = rc.lower()
+            if c == 'j':
+                if rc == 'j':
+                    controller.move_by(0,speed)
+                else:
+                    controller.jog(0,1)
+                    jogging = True
+            elif c == 'k':
+                if rc == 'k':
+                    controller.move_by(0, -speed)
+                else:
+                    controller.jog(0,-1)
+                    jogging = True
+            elif c == 'h':
+                if rc == 'h':
+                    controller.move_by(-speed,0)
+                else:
+                    controller.jog(-1,0)
+                    jogging = True
+            elif c == 'l':
+                if rc == 'l':
+                    controller.move_by(speed,0)
+                else:
+                    controller.jog(1,0)
+                    jogging = True
+            elif re.match("[0-9]", c):
+                speed = pow(2,ord(c) - ord("0"))
+            elif c == "d":
+                saved_speed = speed
+                speed = 0
+                controller.set_head_down(True)
+            elif c == "u" and saved_speed is not None:
+                controller.set_head_down(False)
+                speed = saved_speed
+                saved_speed = None
+            elif c == "s":
+                controller.set_spindle(not controller.spindle)
+            elif c in [ 'q','w','e','r','t','y' ]:
+                speed = { 'q':10, 'w':20, 'e':40, 'r':60, 't':80, 'y':99 }[c]
+                controller.set_spindle_speed(speed)
+            elif c == "!":
+                return
+            if jogging:
+                _grabkey()
+                controller.stop_jog()
+                jogging = False
+    except KeyboardInterrupt:
+        controller.set_head_down(False)
+        controller.set_spindle(False)
         sys.exit(1)
+    finally:
+        controller.set_head_down(False)
+        controller.set_spindle(False)
+        controller.set_units(old_units)
 
 def engrave(controller, commands, args):
     controller.zero_here()
@@ -171,19 +202,23 @@ def engrave(controller, commands, args):
 
     def tool_change(c):
         """M6"""
+        # move to the toolchange position
         controller.set_head_down(False)
         controller.set_spindle(False)
-        old_units = controller.steps_per_unit
-        controller.set_units_mm()
+        old_units = controller.set_units_mm()
         old_speed = controller.set_max_speed()
         old_pos = controller.get_pos()
         while controller.move_by(-200,0) == (-200,0):
             pass # drive the controller to the toolchange position, 200mm at a time
         while controller.move_by(0,-200) == (0,-200):
             pass
-        go = ""
-        while go != "GO":
-            go = raw_input("Type 'GO' and press enter to resume engraving once you've finished the toolchange")
+
+        print "Perform the tool change, jog the head around if necessary to make depth test cut(s)"
+        print "When you're done the controller will automatically return to the correct position"
+        jog_controller(controller)
+
+        # go back to where we were
+        controller.set_max_speed()
         controller.move_to(*old_pos)
         controller.set_speed(old_speed)
         controller.set_units(old_units)
@@ -204,7 +239,7 @@ def engrave(controller, commands, args):
         # drillify!
         controller.set_spindle(not args.no_spindle)
         controller.set_head_down(not args.head_up)
-        time.sleep(c.get("P",3)) # should maybe use R & Z here to calculate a dwell period for G81... ???
+        time.sleep(c.get("P",1.2)) # should maybe use R & Z here to calculate a dwell period for G81... ???
 
         # done
         controller.set_head_down(False)
@@ -250,6 +285,8 @@ def engrave(controller, commands, args):
             print "Ignoring unexpected command %s (line %d)" % (c["name"], c["line"])
         current += 1
         print "Command %d/%d" % (current, len(commands))
+
+    controller.find_corner(-1,-1)
 
 if __name__ == "__main__":
     main()

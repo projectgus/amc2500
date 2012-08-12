@@ -98,9 +98,10 @@ class AMC2500:
         self.limits = (0,0)
         self.jogging = False
         self.cur_step_speed = 1 # in steps/sec, gets set to real value by set_speed call at end of this function
+        self.steps_per_unit = 1 # gets set to real value by set_units_steps() call below
         self.head_down = False # head down flag
         self.spindle = False # spindle on flag
-        self.cur_spindle_speed = -1 # in spindle power       
+        self.cur_spindle_speed = -1 # in spindle power 
         self.set_units_steps()
         self._debug("Initialising controller on %s..." % port)
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
@@ -112,17 +113,18 @@ class AMC2500:
 
     def set_units(self, steps_per_unit):
         self._debug("Setting units to %d steps/unit" % steps_per_unit)
+        old_units = self.steps_per_unit
         self.steps_per_unit = float(steps_per_unit)
+        return old_units
 
     def set_units_mm(self):
-        self.set_units(STEPS_PER_MM)
+        return self.set_units(STEPS_PER_MM)
 
     def set_units_inches(self):
-        self.set_units(STEPS_PER_INCH)
-
+        return self.set_units(STEPS_PER_INCH)
 
     def set_units_steps(self):
-        self.set_units(1)
+        return self.set_units(1)
 
 
     def _steps_to_units(self, steps):
@@ -198,9 +200,12 @@ class AMC2500:
         will be clamped by this method.
 
         """
+        changing_speed = (ss != self.cur_spindle_speed) and self.spindle
         self.cur_spindle_speed = ss
         ss = min(99, max(ss, 0))
         self._write_pos("SS%d" % round(ss),10)
+        if changing_speed:
+            time.sleep(0.3) # spindle takes time to spin up/down
 
     def set_head_down(self, is_down):
         """
@@ -214,6 +219,7 @@ class AMC2500:
             return
         res = self._write_pos("HD" if is_down else "HU", SHORT_TIMEOUT)
         self.head_down = is_down
+        time.sleep(0.3) # head movements not instant
         return res
 
     def set_spindle(self, spindle_on):
@@ -225,6 +231,7 @@ class AMC2500:
         self.spindle = spindle_on
         self._write("MO%d" % ( 1 if spindle_on else 0 ))
         self.set_spindle_speed(self.cur_spindle_speed) # setting on seems to reset this back to full speed
+        time.sleep(0.3) # spindle takes time to spin up/down
 
     def jog(self, x, y, jog_speed=1000):
         """
