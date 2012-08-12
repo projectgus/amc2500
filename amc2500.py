@@ -142,6 +142,10 @@ class AMC2500:
         """
         return self._steps_to_units(self.pos)
 
+    def set_max_speed(self):
+        """ You can run as high as 4000steps/second but you miss steps """
+        self.set_speed(self._steps_to_units(1500))
+
     def set_speed(self, speed, force_redundant_set=False):    
         """ Set head speed (units/second for the currently set unit)
         
