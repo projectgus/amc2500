@@ -108,7 +108,7 @@ def jog_controller(controller):
     saved_speed = None
     jogging = False
     controller.set_head_down(False)
-    controller.set_spindle(False)
+    controller.set_spindle_on(False)
     controller.save_state()
     controller.set_units_steps()
     try:
@@ -150,7 +150,7 @@ def jog_controller(controller):
                 speed = saved_speed
                 saved_speed = None
             elif c == "s":
-                controller.set_spindle(not controller.spindle)
+                controller.set_spindle_on(not controller.get_spindle_on())
             elif c in [ 'q','w','e','r','t','y' ]:
                 speed = { 'q':10, 'w':20, 'e':40, 'r':60, 't':80, 'y':99 }[c]
                 controller.set_spindle_speed(speed)
@@ -164,7 +164,7 @@ def jog_controller(controller):
                     try:
                         controller.set_units_mm()
                         controller.set_speed(0.3) # 0.3mm/sec for test pass
-                        controller.set_spindle(True)
+                        controller.set_spindle_on(True)
                         controller.set_head_down(True)
                         controller.move_by(10, 0)
                         controller.set_head_down(False)
@@ -172,7 +172,7 @@ def jog_controller(controller):
                         controller.set_head_down(True)
                         controller.move_by(-10, 0)
                         controller.set_head_down(False)
-                        controller.set_spindle(False)
+                        controller.set_spindle_on(False)
                         controller.move_by(0,-width)
                     finally:
                         controller.restore_state()
@@ -187,7 +187,7 @@ def jog_controller(controller):
                 jogging = False
     except KeyboardInterrupt:
         controller.set_head_down(False)
-        controller.set_spindle(False)
+        controller.set_spindle_on(False)
         sys.exit(1)
     finally:
         controller.restore_state()
@@ -223,7 +223,7 @@ def engrave(controller, commands, args):
         """M2"""
         print "Program End!"
         controller.set_head_down(False)
-        controller.set_spindle(False)
+        controller.set_spindle_on(False)
         controller.set_max_speed()
         controller.move_to(0,0)
 
@@ -231,7 +231,7 @@ def engrave(controller, commands, args):
         """M6"""
         # move to the toolchange position
         controller.set_head_down(False)
-        controller.set_spindle(False)
+        controller.set_spindle_on(False)
         controller.save_state()
         controller.set_units_mm()
         controller.set_max_speed()
@@ -250,7 +250,7 @@ def engrave(controller, commands, args):
     def drill_cycle(c):
         """G81/G82"""
         controller.set_head_down(False)
-        controller.set_spindle(False)
+        controller.set_spindle_on(False)
 
         # preliminary move
         controller.save_state()
@@ -262,13 +262,13 @@ def engrave(controller, commands, args):
         controller.restore_state()
 
         # drillify!
-        controller.set_spindle(not args.no_spindle)
+        controller.set_spindle_on(not args.no_spindle)
         controller.set_head_down(not args.head_up)
         time.sleep(c.get("P",1.2)) # should maybe use R & Z here to calculate a dwell period for G81... ???
 
         # done
         controller.set_head_down(False)
-        controller.set_spindle(False)
+        controller.set_spindle_on(False)
 
     def ignore(c):
         pass
@@ -292,8 +292,8 @@ def engrave(controller, commands, args):
         "G91" : lambda c: set_absolute(False),
         "G94" : ignore, # units per minute feed rate (default)
         "M2"  : finish_program,
-        "M3" : lambda c: controller.set_spindle(not args.no_spindle),
-        "M5" : lambda c: controller.set_spindle(False),
+        "M3" : lambda c: controller.set_spindle_on(not args.no_spindle),
+        "M5" : lambda c: controller.set_spindle_on(False),
         "M6" : tool_change,
         "M9" : ignore, # coolant off
         "S" : set_spindle_speed,

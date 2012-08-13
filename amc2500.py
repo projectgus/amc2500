@@ -133,12 +133,12 @@ class AMC2500:
         self.set_units_steps()
         self.set_head_down(False)
         if move_back:
-            self.set_spindle(False)
+            self.set_spindle_on(False)
             self.set_max_speed()
             self.move_to(*restore.pos)
         self.set_speed(restore.cur_step_speed)
         self.set_spindle_speed(restore.spindle_speed)
-        self.set_spindle(restore.spindle_on)
+        self.set_spindle_on(restore.spindle_on)
         self.set_head_down(restore.head_down)
         self.set_units(restore.steps_per_unit)
         self._states.pop()
@@ -253,7 +253,10 @@ class AMC2500:
         time.sleep(0.3) # head movements not instant
         return res
 
-    def set_spindle(self, spindle_on):
+    def get_spindle_on(self):
+        return self.state.spindle_on
+
+    def set_spindle_on(self, spindle_on):
         """
         Turn the spindle motor on/off as per the spindle_on paramether
         """        
@@ -363,6 +366,7 @@ class AMC2500:
         print "Moving to %.1f,%.1f" % (x,y)
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)
         (dx_s, dy_s) = (x_s-self.state.pos[0], y_s-self.state.pos[1])
+        print "Steps, moving %d,%d->%d,%d delta %d,%d" % (self.state.pos[0],self.state.pos[1],x_s,y_s,dx_s,dy_s)
         return self._move_by_steps(dx_s,dy_s)
 
     def arc_to(self, x, y, i, j, cw):
@@ -393,7 +397,7 @@ class AMC2500:
         """
 
         self.set_head_down(False)
-        self.set_spindle(False)
+        self.set_spindle_on(False)
         self.save_state()
         fast=self._steps_to_units(2000)
         slow=self._steps_to_units(250)
