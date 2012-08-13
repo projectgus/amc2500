@@ -131,13 +131,17 @@ class AMC2500:
         """
         restore = self._states[-2]
         self.set_units_steps()
-        self.set_head_down(False)
         if move_back:
+            self.set_head_down(False)
             self.set_spindle_on(False)
             self.set_max_speed()
             self.move_to(*restore.pos)
+        else: # not moving back, so just accept where we are
+            restore.pos = self.state.pos
         self.set_speed(restore.cur_step_speed)
         self.set_spindle_speed(restore.spindle_speed)
+        if restore.spindle_on and not self.get_spindle_on():
+            self.set_head_down(False)
         self.set_spindle_on(restore.spindle_on)
         self.set_head_down(restore.head_down)
         self.set_units(restore.steps_per_unit)
