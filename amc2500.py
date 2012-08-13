@@ -69,28 +69,24 @@ class AMCError(EnvironmentError):
     def __init__(self, error):
         EnvironmentError.__init__(self, (-1, error))
 
-"""
-Class to remote control an AMC2500 w/ a Quick Circuit 5000 attached.
-
-Code developed through protocol reverse engineering, so who knows if it will work
-
-Notable properties:
-
-pos - this is where the controller thinks it is, in steps
-limits - these are the limits the controller thinks it has hit (X,Y) as 0,-1,1 for Off,-+
-
-"""
 class AMC2500:
     """
-    Construct a new controller on the specified serial port
+    Class to remote control an AMC2500 w/ a Quick Circuit 5000 attached.
 
-    Set debug and/or trace if you want some info on stdout about 
-    what the controller is doing.
+    Code developed through protocol reverse engineering, so who knows if it will work
+
     """
     def __init__(self,
                  port='/dev/ttyUSB0',
                  debug=True,
                  trace=True):
+
+        """
+        Construct a new controller on the specified serial port
+
+        Set debug and/or trace if you want some info on stdout about
+        what the controller is doing.
+        """
         self.ser = self._get_serial(port)
         self.ser.open()
         self.trace=trace
@@ -447,7 +443,7 @@ class AMC2500:
         while self.ser.inWaiting() > 0:
             dumped = self.ser.read(self.ser.inWaiting())
             print "WARNING dumping unexpected %d chars '%s'" % (len(dumped),dumped)
-        self.ser.write("%s\n" % cmd)        
+        self.ser.write("%s\n" % cmd)
         if self.trace:
             print "%s W %s" % (ts(), cmd)
         if response_timeout_s is None:
