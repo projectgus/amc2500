@@ -155,7 +155,7 @@ def jog_controller(controller):
                 speed = { 'q':10, 'w':20, 'e':40, 'r':60, 't':80, 'y':99 }[c]
                 controller.set_spindle_speed(speed)
             elif c == "i":
-                width = raw_input("Enter the isolation width to test in mm (engraver will make two parallel 10mm lines this far apart.)\n> ")
+                width = raw_input("Enter the isolation width to test in mm (engraver will make two parallel 15mm lines this far apart.)\n> ")
                 try:
                     width = float(width)
                     if width <= 0 or width > 10:
@@ -163,14 +163,14 @@ def jog_controller(controller):
                     controller.save_state()
                     try:
                         controller.set_units_mm()
-                        controller.set_speed(0.3) # 0.3mm/sec for test pass
+                        controller.set_speed(4) # 4mm/sec for test pass
                         controller.set_spindle_on(True)
                         controller.set_head_down(True)
-                        controller.move_by(10, 0)
+                        controller.move_by(15, 0)
                         controller.set_head_down(False)
                         controller.move_by(0,width)
                         controller.set_head_down(True)
-                        controller.move_by(-10, 0)
+                        controller.move_by(-15, 0)
                         controller.set_head_down(False)
                         controller.set_spindle_on(False)
                         controller.move_by(0,-width)
