@@ -64,11 +64,13 @@ class ParserCtx:
     def __init__(self):
         self.command = None
         self.sticky_command = None
+        self.has_args = False
 
 def parse_command(ctx, tok):
     ctx.command = { 'name' : tok.value,
                 'line' : tok.lineno,
                 }
+    ctx.has_args = True
     if tok.value in STICKY_COMMANDS:
         ctx.sticky_command = ctx.command
 
@@ -77,22 +79,26 @@ def parse_spindle_command(ctx, tok):
                     'line' : tok.lineno,
                     'S' : tok.value,
                     }
+    ctx.has_args = True
 
 def parse_param(ctx, tok):
     if ctx.command is None:
         raise ParserException("Got parameter without a defined command on line %d" % tok.lineno)
     ctx.command[tok.value[0]] = tok.value[1]
     ctx.command['line'] = tok.lineno
+    ctx.has_args = True
 
 def parse_newline(ctx, tok):
     old_command = ctx.command
+    has_args = ctx.has_args
 
     try:
         ctx.command = ctx.sticky_command.copy()
     except AttributeError:
         ctx.command = None
+    ctx.has_args = False
 
-    if old_command is not None:
+    if old_command is not None and has_args:
         return old_command
 
 def parse_comment(ctx,tok):
