@@ -320,7 +320,10 @@ def engrave(controller, commands, args):
         current += 1
         print "Command %d/%d" % (current, len(commands))
 
-    controller.find_corner(-1,-1)
+    controller.set_max_speed()
+    controller.set_head_down(False)
+    controller.set_spindle_on(False)
+    controller.move_to(0,0)
 
 if __name__ == "__main__":
     main()
