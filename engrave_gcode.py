@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import argparse, sys, termios, tty, curses, re, time, itertools, select
+import argparse, sys, termios, tty, re, time, select
 import gcode_parse
 
 from amc2500 import AMC2500, SimController
@@ -11,7 +11,7 @@ parser.add_argument('--no-spindle', action='store_true',
                     help='Testing option: keep the spindle motor off during the engraving pass.')
 parser.add_argument('--head-up', action='store_true',
                     help='Testing option: keep the spindle head up during the engraving pass.')
-parser.add_argument('-', '--no-jog', action='store_true',
+parser.add_argument('-n', '--no-jog', action='store_true',
                     help='Skip the "jog to find origin" step (use if the spindle head is already over the starting point.')
 parser.add_argument('-s', '--serial-port', default='/dev/ttyUSB0',
                     help="Specify the serial port that the engraver is connected to.")
@@ -19,12 +19,6 @@ parser.add_argument('-v', '--verbose', action='store_true',
                     help="Verbose mode (print every command the engraver executes to stderr.")
 parser.add_argument('files', nargs='+', help="One or more gcode files, which will be sent to the engraver in the order given. Insert the phrase TC by itself between any two files where you want a toolchange run.")
 
-
-def header(path):
-    return [  ]
-
-def footer(path):
-    return [  ]
 
 def main():
     args = parser.parse_args()
