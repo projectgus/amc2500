@@ -250,7 +250,6 @@ def engrave(controller, commands, args):
     def drill_cycle(c):
         """G81/G82"""
         controller.set_head_down(False)
-        controller.set_spindle_on(False)
 
         # preliminary move
         controller.save_state()
@@ -262,13 +261,11 @@ def engrave(controller, commands, args):
         controller.restore_state()
 
         # drillify!
-        controller.set_spindle_on(not args.no_spindle)
         controller.set_head_down(not args.head_up)
         time.sleep(c.get("P",1.2)) # should maybe use R & Z here to calculate a dwell period for G81... ???
 
         # done
         controller.set_head_down(False)
-        controller.set_spindle_on(False)
 
     def ignore(c):
         pass
