@@ -17,13 +17,14 @@ parser.add_argument('-s', '--serial-port', default='/dev/ttyUSB0',
                     help="Specify the serial port that the engraver is connected to.")
 parser.add_argument('-v', '--verbose', action='store_true',
                     help="Verbose mode (print every command the engraver executes to stderr.")
-parser.add_argument('files', nargs='+', help="One or more gcode files, which will be sent to the engraver in the order given. Insert the phrase TC by itself between any two files where you want a toolchange run.")
+parser.add_argument('files', nargs='*', help="Gcode files, which will be sent to the engraver in the order given. Insert the phrase TC by itself between any two files where you want a toolchange run.")
 
 
 def main():
     args = parser.parse_args()
 
-    print "Loading gcode..."
+    if len(args.files) > 0:
+        print "Loading gcode..."
     commands = [ ]
     toolchange = False
     for path in args.files:
@@ -50,8 +51,11 @@ def main():
     controller.debug = args.verbose
 
     if not args.no_jog:
-        print "Jog the controller to set up the initial pass. When done, tool should be over the origin point."
+        if len(args.files) > 0:
+            print "Jog the controller to set up the initial pass. When done, tool should be over the origin point."
         jog_controller(controller)
+    if len(args.files) == 0:
+        return
     print "Ready to start. Controller should be above origin of design."
     print "This is %s." % ("a simulated run only" if args.sim else
                            "just a dry run (head up, no spindle.)" if (args.head_up and args.no_spindle) else
