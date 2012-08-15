@@ -200,10 +200,14 @@ def engrave(controller, commands, args):
 
     def linear_move(c):
         """G00, G01"""
+        is_fast = c["name"] == "G0"
         if "F" in c:
             controller.set_speed(float(c["F"])/60) # mm/min to mm/sec
         if "Z" in c:
             controller.set_head_down(c["Z"] < 0 and not args.head_up)
+        if is_fast:
+            controller.save_state()
+            controller.set_max_speed()
         try:
             if args.absolute:
                 controller.move_to(c["X"], c["Y"])
@@ -211,6 +215,8 @@ def engrave(controller, commands, args):
                 controller.move_by(c["X"], c["Y"])
         except KeyError:
             pass
+        if is_fast:
+            controller.restore_state()
 
     def set_spindle_speed(c):
         """Sxxxxxxx"""
