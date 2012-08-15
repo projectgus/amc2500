@@ -65,7 +65,7 @@ def main():
     engrave(controller, commands, args)
 
 
-def _grabkey():
+def _grabkey(wait_for_key):
     """ Grab a key from stdin once one is available, but also clear any pending keyboard
     buffer to defeat keyboard repeat rate backing them up
 
@@ -73,13 +73,14 @@ def _grabkey():
     key is returned
     """
     old_settings = termios.tcgetattr(sys.stdin)
-    tty.setcbreak(sys.stdin.fileno())
+    tty.setcbreak(sys.stdin.fileno(), termios.TCSANOW)
     try:
         # call to select indicates if there is anything ready in stdin
         #
-        # first call has timeout == None so blocks until something is ready,
-        # subsequent calls have timeout == 0 so only poll for more characters buffered
-        timeout = None
+        # for wait_for_key, first call has timeout == None so blocks until something is ready,
+        # other calls have timeout == 0 so only poll for more characters buffered
+        timeout = None if wait_for_key else 0
+        result = None
         while len(select.select([sys.stdin], [], [], timeout)[0]) > 0:
             result = sys.stdin.read(1)
             timeout = 0
@@ -107,7 +108,7 @@ def jog_controller(controller):
     controller.set_units_steps()
     try:
         while True:
-            rc = _grabkey()
+            rc = _grabkey(True)
             c = rc.lower()
             if c == 'j':
                 if rc == 'j':
@@ -176,7 +177,7 @@ def jog_controller(controller):
             elif c == "!":
                 return
             if jogging:
-                _grabkey()
+                _grabkey(True)
                 controller.stop_jog()
                 jogging = False
     except KeyboardInterrupt:
@@ -303,6 +304,17 @@ def engrave(controller, commands, args):
             sys.stderr.write("%s\n" % c)
         try:
             ACTIONS[c["name"]](c)
+            if _grabkey(False):
+                print "Pausing! To quit right now, press Ctrl-C"
+                print "To return head to origin and -then- quit, press Q."
+                print "Pressing any other key will resume"
+                key = _grabkey(True).lower()
+                if key == 'q':
+                    break
+        except KeyboardInterrupt:
+            controller.set_head_down(False)
+            controller.set_spindle_on(False)
+            sys.exit(1)
         except KeyError:
             print "Ignoring unexpected command %s (line %d)" % (c["name"], c["line"])
         current += 1
