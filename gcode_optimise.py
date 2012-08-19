@@ -3,7 +3,7 @@ import math
 MM_PER_INCH = 25.4
 
 def optimise(commands, deviation_threshold):
-    return list(simplify_movements(commands, deviation_threshold))
+    return list(optimise_drills(optimise_deviation(commands, deviation_threshold)))
 
 def point_line((ax,ay), (bx,by), (px,py)):
     """ Distance of point (px,py) from line between (ax,ay) and (bx,by) """
@@ -55,10 +55,10 @@ def annotate_state(commands):
         yield pos,units_mm,absolute,c
 
 
-def simplify_movements(commands, thres_mm):
+def optimise_deviation(commands, thres_mm):
     """
-    Go over any long sequences of movements and linearise any that lie
-    within "threshold" mm of a straight line
+    Go over any sequences of linear movements and combine any that are
+    within "threshold" mm deviation from a straight line
     """
     skip_next = False
     thres = thres_mm # keep threshold in current units
@@ -86,4 +86,31 @@ def simplify_movements(commands, thres_mm):
             except KeyError:
                 pass
         yield a
+
+
+def optimise_drills(commands):
+    """ Optimise any sequence of absolute positioned drill commands (G81/G82)
+
+    To try and reduce to-ing and fro-ing across workpiece
+    """
+    drills = []
+    drilltype = None
+    for pos,units_mm,absolute,c in annotate_state(commands):
+        if c["name"] in ("G81","G82") and absolute and "X" in c and "Y" in c:
+            drills.append(c)
+        else:
+            if len(drills):
+                for d in order_drills(pos, drills):
+                    yield d
+                drills = []
+            yield c
+
+def order_drills(pos, drills):
+    """ Given a list of drill cycles, sort them for minimal distance travelled (greedy, non-optimal) """
+    while len(drills):
+        # sort by distance from current point
+        closest = min(drills, key=lambda a: math.hypot(pos[0]-a["X"],pos[1]-a["Y"]))
+        yield closest
+        pos = (closest["X"], closest["Y"])
+        drills.remove(closest)
 
