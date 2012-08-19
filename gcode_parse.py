@@ -4,14 +4,38 @@
 # A simple gcode parser - no variables, intended to cover pcb2gcode output only
 # -----------------------------------------------------------------------------
 
-# Tokens
 
 import itertools, re
-
 import ply.lex as lex
+
+# Public interface
+
+def parse(content):
+    lexer.lineno = 1
+    lexer.input(content)
+
+    ctx = ParserCtx()
+    while True:
+        tok = lexer.token()
+        if tok is None:
+            return
+        try:
+            result = PARSER_FUNCTIONS[tok.type](ctx, tok)
+            if result is not None:
+                yield result
+        except KeyError:
+            raise ParserException("Unexpected token in stream: %s" % tok)
+
+
+def parse_file(filepath):
+    with open(filepath) as f:
+        return list(parse(f.read()))
 
 class ParserException(Exception):
     pass
+
+
+# Tokeniser
 
 tokens = (
    'COMMAND',
@@ -112,19 +136,3 @@ PARSER_FUNCTIONS = {
     "newline" : parse_newline,
     "COMMENT" : parse_comment,
     }
-
-
-def parse(content):
-    lexer.input(content)
-
-    ctx = ParserCtx()
-    while True:
-        tok = lexer.token()
-        if tok is None:
-            return
-        try:
-            result = PARSER_FUNCTIONS[tok.type](ctx, tok)
-            if result is not None:
-                yield result
-        except KeyError:
-            raise ParserException("Unexpected token in stream: %s" % tok)
