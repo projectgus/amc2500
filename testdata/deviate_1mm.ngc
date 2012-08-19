@@ -1,0 +1,21 @@
+( Line simplification test, 10mm vertical line with 1mm deviation )
+
+G94     ( mm per minute feed rate. )
+G21     ( Units == mm.             )
+G90     ( Absolute coordinates.        )
+S30000  ( RPM spindle speed.           )
+
+G00 Z1.00000 ( retract )
+
+M6
+G00 X10.0 Y10.0 ( rapid move to begin. )
+M3
+G01 Z-1.00000 F20.00000 ( plunge. )
+X11.0 Y15.0
+X10.0 Y20.0
+
+G00 Z1.00000 ( retract )
+M5
+
+M9 ( Coolant off. )
+M2 ( Program end. )

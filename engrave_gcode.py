@@ -1,23 +1,37 @@
 #!/usr/bin/env python
 import argparse, sys, termios, tty, re, time, select
-import gcode_parse
+import gcode_parse, gcode_optimise
 
 from amc2500 import AMC2500, SimController
 
 parser = argparse.ArgumentParser(description='Engrave some gcode file(s) from the pcb2gcode package.')
-parser.add_argument('--sim', action='store_true',
-                    help="Testing option: simulation run only (no real engraver involved.)")
-parser.add_argument('--no-spindle', action='store_true',
-                    help='Testing option: keep the spindle motor off during the engraving pass.')
-parser.add_argument('--head-up', action='store_true',
-                    help='Testing option: keep the spindle head up during the engraving pass.')
-parser.add_argument('-n', '--no-jog', action='store_true',
-                    help='Skip the "jog to find origin" step (use if the spindle head is already over the starting point.')
-parser.add_argument('-s', '--serial-port', default='/dev/ttyUSB0',
+
+group = parser.add_argument_group(title="Engraver Controller")
+inner = group.add_mutually_exclusive_group()
+inner.add_argument('-s', '--serial-port', default='/dev/ttyUSB0',
                     help="Specify the serial port that the engraver is connected to.")
-parser.add_argument('-v', '--verbose', action='store_true',
+inner.add_argument('--sim', action='store_true',
+                    help="Testing option: simulation run only (no real engraver involved.)")
+group.add_argument('--no-spindle', action='store_true',
+                    help='Testing option: keep the spindle motor off during the engraving pass.')
+group.add_argument('--head-up', action='store_true',
+                    help='Testing option: keep the spindle head up during the engraving pass.')
+group.add_argument('-n', '--no-jog', action='store_true',
+                    help='Skip the "jog to find origin" step (use if the spindle head is already over the starting point.')
+
+group = parser.add_argument_group(title="Debugging")
+group.add_argument('-v', '--verbose', action='store_true',
                     help="Verbose mode (print every command the engraver executes to stderr.")
-parser.add_argument('files', nargs='*', help="Gcode files, which will be sent to the engraver in the order given. Insert the phrase TC by itself between any two files where you want a toolchange run.")
+
+group = parser.add_argument_group(title="GCode Optimisation")
+inner = group.add_mutually_exclusive_group()
+inner.add_argument('--max-deviation', default=0.025,
+                    help="Optimise out deviations from straight lines that are less than this much (units mm, default 0.025mm.)")
+inner.add_argument('--no-optimise', action='store_true',
+                    help="Don't optimise the gcode at all, do exactly what it describes")
+
+group = parser.add_argument_group(title="Files to Engrave")
+group.add_argument('files', nargs='*', help="Gcode files, which will be sent to the engraver in the order given. Insert the phrase TC by itself between any two files where you want a toolchange run.")
 
 
 def main():
@@ -44,6 +58,12 @@ def main():
                 except gcode_parse.ParserException, err:
                     print "Failed to parse %s: %s" % (path, err)
                     sys.exit(1)
+
+    if not args.no_optimise:
+        print "Optimising gcode..."
+        before = len(commands)
+        commands = gcode_optimise.optimise(commands, args.max_deviation)
+        print "(Before optimisation: %d commands. After optimisation: %d commands)" % (before, len(commands))
 
     print "Connecting to AMC controller..."
     controller = SimController() if args.sim else AMC2500(port=args.serial_port)
