@@ -25,13 +25,14 @@
 import datetime, re, time
 import serial
 import math
-from visitor import is_visitor, when
-from gcode import *
+import copy
+import collections
 
-STEPS_PER_MM=(1/0.006350)
+STEPS_PER_INCH=4000 # steps are 4 thou
+STEPS_PER_MM=STEPS_PER_INCH/25.4
 
 MOVEABLE_WIDTH = (431 * STEPS_PER_MM)
-MOVEABLE_HEIGHT= (390 * STEPS_PER_MM) 
+MOVEABLE_HEIGHT= (390 * STEPS_PER_MM)
 
 SHORT_TIMEOUT=0.5
 
@@ -68,84 +69,132 @@ class AMCError(EnvironmentError):
     def __init__(self, error):
         EnvironmentError.__init__(self, (-1, error))
 
-"""
-Class to remote control an AMC2500 w/ a Quick Circuit 5000 attached.
-
-Code developed through protocol reverse engineering, so who knows if it will work
-
-Notable properties:
-
-pos - this is where the controller thinks it is, in steps
-limits - these are the limits the controller thinks it has hit (X,Y) as 0,-1,1 for Off,-+
-
-"""
 class AMC2500:
+    """
+    Class to remote control an AMC2500 w/ a Quick Circuit 5000 attached.
+
+    Code developed through protocol reverse engineering, so who knows if it will work
 
     """
-    Construct a new controller on the specified serial port
-    
-    Set debug and/or trace if you want some info on stdout about 
-    what the controller is doing.
-    """
-    def __init__(self, 
+    def __init__(self,
                  port='/dev/ttyUSB0',
                  debug=True,
                  trace=True):
+
+        """
+        Construct a new controller on the specified serial port
+
+        Set debug and/or trace if you want some info on stdout about
+        what the controller is doing.
+        """
         self.ser = self._get_serial(port)
         self.ser.open()
         self.trace=trace
         self.debug=debug
-        self.pos = (0,0)  # pos is always stored internally in steps
         self.limits = (0,0)
         self.jogging = False
-        self.cur_step_speed = None # in steps/sec
-        self.head_down = False # head down flag
-        self.spindle = False # spindle on flag
-        self.cur_spindle_speed = -1 # in spindle power       
+
+        # set up initial state as an anonymous object, so we can save/restore it later on
+        state = type("AMC2500_InternalState", (), {})()
+        state.cur_step_speed = 1
+        state.steps_per_unit = 1
+        state.head_down = False
+        state.spindle_on = False
+        state.spindle_speed = -1
+        state.pos = (0,0) # pos always stored in steps
+
+        self._states = [ state ]
+
         self.set_units_steps()
         self._debug("Initialising controller on %s..." % port)
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
         self._write("EO0", SHORT_TIMEOUT)
         self.set_speed(1000, True)
 
+    @property
+    def state(self):
+        return self._states[-1]
+
+    def save_state(self):
+        """
+        Save the current internal state & position on the controller
+        so we can restore to it later.
+
+        Saved states can be stacked and then restored later."""
+        self._states.append(copy.copy(self.state))
+
+    def restore_state(self, move_back=False):
+        """
+        Restore the last saved state of the controller.
+        Optionally move the controller back to its old position
+        (won't work if the controller has been zeroed since saving it.)
+        """
+        restore = self._states[-2]
+        self.set_units_steps()
+        if move_back:
+            self.set_head_down(False)
+            self.set_spindle_on(False)
+            self.set_max_speed()
+            self.move_to(*restore.pos)
+        else: # not moving back, so just accept where we are
+            restore.pos = self.state.pos
+        self.set_speed(restore.cur_step_speed)
+        self.set_spindle_speed(restore.spindle_speed)
+        if restore.spindle_on and not self.get_spindle_on():
+            self.set_head_down(False)
+        self.set_spindle_on(restore.spindle_on)
+        self.set_head_down(restore.head_down)
+        self.set_units(restore.steps_per_unit)
+        self._states.pop()
 
     def _get_serial(self, port):
         return serial.Serial(port=port, baudrate=9600)
 
     def set_units(self, steps_per_unit):
         self._debug("Setting units to %d steps/unit" % steps_per_unit)
-        self.steps_per_unit = steps_per_unit
+        self.state.steps_per_unit = float(steps_per_unit)
 
     def set_units_mm(self):
-        self.set_units(STEPS_PER_MM)
-                
+        return self.set_units(STEPS_PER_MM)
+
+    def set_units_inches(self):
+        return self.set_units(STEPS_PER_INCH)
+
     def set_units_steps(self):
-        self.set_units(1)
+        return self.set_units(1)
 
 
     def _steps_to_units(self, steps):
         if isinstance(steps, tuple):
             return tuple([ self._steps_to_units(s) for s in list(steps) ])
-        return steps / self.steps_per_unit
+        return float(steps) / self.state.steps_per_unit
     def _units_to_steps(self, units):
         if isinstance(units, tuple):
             return tuple([ self._units_to_steps(u) for u in list(units) ])
-        return units * self.steps_per_unit
+        return int(float(units) * self.state.steps_per_unit)
 
-    
     def get_pos(self):
         """ Get the current (estimated) absolute position of the head
         in the currently set unit
         """
-        return self._steps_to_units(self.pos)
+        return self._steps_to_units(self.state.pos)
 
-    def set_speed(self, speed, force_redundant_set=False):    
+    def get_speed(self):
+        self._steps_to_units(self.state.cur_step_speed)
+
+    def set_max_speed(self):
+        """ You can run as high as 4000steps/second but you miss steps """
+        self.set_speed(self._steps_to_units(1500))
+
+    def set_speed(self, speed, force_redundant_set=False):
         """ Set head speed (units/second for the currently set unit)
-        
+
+        Returns the old speed
+
         VM is the linear speed, when making linear moves, steps/second (linear distance)
         VS is the arc speed, when making arc moves (steps/second around the circumference)
         AT is acceleration/deceleration length, range seems to be:
-        -20 (full slow acceleration) to 
+        -20 (full slow acceleration) to
         1 (no acceleration) to
         20 (full acceleration)
 
@@ -165,29 +214,33 @@ class AMC2500:
         VM6
         AT-7
         """
-        steps_per_second = int(self._units_to_steps(speed))
-        if self.cur_step_speed == steps_per_second and not force_redundant_set:
+        if speed == 0:
+            raise AMCError("Cannot set speed to 0 units/second")
+        steps_per_second = max(self._units_to_steps(speed), 1)
+        if self.state.cur_step_speed == steps_per_second and not force_redundant_set:
             return
-        self.cur_step_speed = steps_per_second        
-        self.cur_speed = speed
-        self._write("VS%d" % steps_per_second) ## ???                
+        self.state.cur_step_speed = steps_per_second
+        self._write("VS%d" % steps_per_second) ## ???
         self._write("VM%d" % steps_per_second)
         self._write("AT%d" % (20 if steps_per_second > 1000 else -10)) ## guesses at useful values
-        self.set_spindle_speed(self.cur_spindle_speed) # setting speed seems to reset this back to full speed
+        self.set_spindle_speed(self.state.spindle_speed) # setting speed seems to reset this back to full speed
 
     def set_spindle_speed(self, ss):
         """
         Set the spindle speed
-        
+
         There are two spindles that are designed for this machine.
         We have the slow spindle which runs from 1k to 5k. The fast spindle
         is speced to 25k. Valid range is 0 to 99 and any passed value
         will be clamped by this method.
 
         """
-        self.cur_spindle_speed = ss
+        changing_speed = (ss != self.state.spindle_speed) and self.state.spindle_on
+        self.state.spindle_speed = ss
         ss = min(99, max(ss, 0))
         self._write_pos("SS%d" % round(ss),10)
+        if changing_speed:
+            time.sleep(0.3) # spindle takes time to spin up/down
 
     def set_head_down(self, is_down):
         """
@@ -197,21 +250,26 @@ class AMC2500:
         
         How up/down exact positions are determined is not yet known!
         """
-        if is_down == self.head_down:
+        if is_down == self.state.head_down:
             return
         res = self._write_pos("HD" if is_down else "HU", SHORT_TIMEOUT)
-        self.head_down = is_down
+        self.state.head_down = is_down
+        time.sleep(0.3) # head movements not instant
         return res
 
-    def set_spindle(self, spindle_on):
+    def get_spindle_on(self):
+        return self.state.spindle_on
+
+    def set_spindle_on(self, spindle_on):
         """
         Turn the spindle motor on/off as per the spindle_on paramether
         """        
-        if spindle_on == self.spindle:
+        if spindle_on == self.state.spindle_on:
             return
-        self.spindle = spindle_on
+        self.state.spindle_on = spindle_on
         self._write("MO%d" % ( 1 if spindle_on else 0 ))
-        self.set_spindle_speed(self.cur_spindle_speed) # setting on seems to reset this back to full speed
+        self.set_spindle_speed(self.state.spindle_speed) # setting on seems to reset this back to full speed
+        time.sleep(0.3) # spindle takes time to spin up/down
 
     def jog(self, x, y, jog_speed=1000):
         """
@@ -261,20 +319,24 @@ class AMC2500:
 
         If successful, returns the actual number of units moved as a tuple (dx,dy)
         """
-        if self.limits[0] != 0 and (dx * self.limits[0] < 0) :
-            self.limits = (0, self.limits[1])
-        if self.limits[1] != 0 and (dy * self.limits[1] < 0) :
-            self.limits = (self.limits[0], 0)
-      
         dx_s = self._units_to_steps(dx)
         dy_s = self._units_to_steps(dy)
-        if(int(dx_s) == 0 and int(dy_s) == 0):
+
+        return self._move_by_steps(dx_s, dy_s)
+
+    def _move_by_steps(self, dx_s, dy_s):
+        if dx_s == 0 and dy_s == 0:
             return # sending 0,0 breaks the controller
 
+        if self.limits[0] != 0 and (dx_s * self.limits[0] < 0) :
+            self.limits = (0, self.limits[1])
+        if self.limits[1] != 0 and (dy_s * self.limits[1] < 0) :
+            self.limits = (self.limits[0], 0)
+
         # todo: calculate an appropriate timeout based on our known stepping rate
-        return self._write_pos("DA%d,%d,0\nGO" % (self._units_to_steps(dy), 
-                                      self._units_to_steps(dx)), 180)
-    
+        return self._write_pos("DA%d,%d,0\nGO" % (dy_s, dx_s), 180)
+
+
     def arc_by(self, dx, dy, i, j, cw):
         """
         Move by (dx,dy) units arcing around the circle centered at (i,j), Clockwise if CW else Counter Clockwise
@@ -287,13 +349,13 @@ class AMC2500:
         i_s = self._units_to_steps(i)
         j_s = self._units_to_steps(j)
 
-        if(int(dx_s) == 0 and int(dy_s) == 0):
+        if dx_s == 0 and dy_s == 0:
             return # sending 0,0 breaks the controller
 
-        if(int(i_s) == 0 and int(j_s) == 0):
+        if i_s == 0 and j_s == 0:
             return # sending 0,0 is likely to break the controller
 
-        if(int(i_s) == int(dx_s) and int(j_s) == int(dy_s)):
+        if i_s == dx_s and j_s == dy_s:
             return # sending (i,j) == (dx,dy) is likely to break the controller
 
        	arc_s = central_angle_steps(i_s, j_s, dx_s, dy_s, cw)
@@ -305,18 +367,20 @@ class AMC2500:
         """
         Move the axis to an absolute position x,y based on currently known position
         """
-        (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
-        (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
-        return self.move_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s))
+        print "Moving to %.1f,%.1f" % (x,y)
+        (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)
+        (dx_s, dy_s) = (x_s-self.state.pos[0], y_s-self.state.pos[1])
+        print "Steps, moving %d,%d->%d,%d delta %d,%d" % (self.state.pos[0],self.state.pos[1],x_s,y_s,dx_s,dy_s)
+        return self._move_by_steps(dx_s,dy_s)
 
     def arc_to(self, x, y, i, j, cw):
         """
         Move the axis to an absolute position x,y based on currently known position
         """
         (x_s, y_s) = self._units_to_steps(x), self._units_to_steps(y)        
-        (dx_s, dy_s) = (x_s-self.pos[0], y_s-self.pos[1])
+        (dx_s, dy_s) = (x_s-self.state.pos[0], y_s-self.state.pos[1])
         (i_s, j_s) = self._units_to_steps(i), self._units_to_steps(j)        
-        (di_s, dj_s) = (i_s-self.pos[0], j_s-self.pos[1])
+        (di_s, dj_s) = (i_s-self.state.pos[0], j_s-self.state.pos[1])
         return self.arc_by(self._steps_to_units(dx_s), self._steps_to_units(dy_s),
                                 self._steps_to_units(di_s), self._steps_to_units(dj_s),cw)
 
@@ -337,8 +401,8 @@ class AMC2500:
         """
 
         self.set_head_down(False)
-        self.set_spindle(False)
-        old_speed=self._steps_to_units(self.cur_step_speed)
+        self.set_spindle_on(False)
+        self.save_state()
         fast=self._steps_to_units(2000)
         slow=self._steps_to_units(250)
         big=self._steps_to_units(80000)
@@ -360,20 +424,20 @@ class AMC2500:
         self.move_by(0,small if ly > 0 else -1*small)
         if self.limits[1] != ly:
             self._error("Failed to find Y limit %d, got limit value %d" % (ly, self.limits[1]))
-        self.set_speed(old_speed)
+        self.restore_state()
         if zero_there:
             self.zero_here()
 
     def zero_here(self):
         """Zero the head on the current coordinates without moving it"""
-        self._debug("Zeroing here (was %d,%d steps)" % self.pos)
-        self.pos = (0,0)
+        self._debug("Zeroing here (was %d,%d steps)" % self.state.pos)
+        self.state.pos = (0,0)
 
     def reinitialise(self):
         self._debug("Reinitialising...")
         self._write("IM", SHORT_TIMEOUT) # puts head up, spindle off
         self._write("EO0", SHORT_TIMEOUT)
-        self.set_speed(self.cur_speed, True)
+        self.set_speed(self.get_speed(), True)
 
     def _error(self, msg):
         print "%s E %s" % (ts(), msg)
@@ -387,7 +451,7 @@ class AMC2500:
         while self.ser.inWaiting() > 0:
             dumped = self.ser.read(self.ser.inWaiting())
             print "WARNING dumping unexpected %d chars '%s'" % (len(dumped),dumped)
-        self.ser.write("%s\n" % cmd)        
+        self.ser.write("%s\n" % cmd)
         if self.trace:
             print "%s W %s" % (ts(), cmd)
         if response_timeout_s is None:
@@ -437,7 +501,7 @@ class AMC2500:
                 vals = vals.groupdict()
                 dpos = (int(vals["y"]), int(vals["x"])) # axes swapped fr h/w
                 self._debug("Moved by %d,%d steps" % dpos)
-                self.pos = (self.pos[0]+dpos[0], self.pos[1]+dpos[1])
+                self.state.pos = (self.state.pos[0]+dpos[0], self.state.pos[1]+dpos[1])
                 if emergency_stop:
                     self._debug("Emergency Stop")
                     self.reinitialise()
@@ -458,7 +522,7 @@ class SimController(AMC2500):
 
     Simulated at the serial port level, with a test stub serial port
     """
-    def __init__(self, 
+    def __init__(self,
                  port='/dev/ttyUSB0',
                  debug=True,
                  trace=True):
@@ -516,9 +580,11 @@ class FakeSerial:
             elif line == "IM": # init command
                 self.buffer.insert(0, "ES0,0,0") # emergency stop
                 self.buffer.insert(1, "")
-            elif re.search(r"^EO.$", line) is not None: # echo on/off
+            elif re.search(r"^SS[0-9]+", line): # spindle speed
+                self.buffer.insert(0, "OK")
+            elif re.search(r"^EO.$", line): # echo on/off
                 self.buffer.insert(0, "echo off")                
-            elif re.search(r"^H.$", line) is not None: # head up/down
+            elif re.search(r"^H.$", line): # head up/down
                 self.buffer.insert(0, "OK0,0,0")
             elif line in [ "VS0", "VM0", "AT0" ]:
                 raise AMCError("Cannot set a zero speed (bad command %s)" % line)
@@ -544,66 +610,6 @@ class FakeSerial:
 
     def inWaiting(self):
         return len("\n".join(self.buffer))
-
-
-@is_visitor
-class AMCRenderer:
-    """A renderer to take gcode commands (via gcode module) and send them to the controller
-    """
-    def __init__(self, controller, keep_spindle_off=False, keep_head_up=False):
-        """ Create a new renderer.
-        controller - controller instance to use
-        keep_spindle_off  - set to true to keep the spindle from running
-        keep_head_up      - set to true to keep the head up
-        """
-        self.controller = controller
-        self.keep_spindle_off = keep_spindle_off
-        self.keep_head_up = keep_head_up
-        self.home = True # assumed
-
-    @when(BaseCommand, allow_cascaded_calls=True)
-    def render(self, cmd):
-        if len(cmd.comment) > 0:
-            print "Comment: %s" % cmd.comment
-
-    @when(LinearCommand)
-    def render(self, cmd):
-        if cmd.to_z is not None:
-            self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
-        if cmd.f is not None:
-            self.controller.set_speed(cmd.f / 60)
-        else:
-            self.controller.set_speed(10)
-        if cmd.to_x is not None and cmd.to_y is not None:
-            self.controller.move_to(cmd.to_x, cmd.to_y)
-        self.home = self.home and self.controller.limits == (-1,-1) # still on home?
-        if self.controller.limits != (0,0) and not self.home:
-            raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
-
-    @when(ArcCommand)
-    def render(self, cmd):
-        if cmd.to_z is not None:
-            self.controller.set_head_down(cmd.to_z <= 0 and not self.keep_head_up)
-        if cmd.f is not None:
-            self.controller.set_speed(cmd.f / 60)
-        if cmd.to_x is not None and cmd.to_y is not None:
-            self.controller.arc_to(cmd.to_x, cmd.to_y, cmd.cn_x, cmd.cn_y,cmd.cw)
-        self.home = self.home and self.controller.limits == (-1,-1) # still on home?
-        if self.controller.limits != (0,0) and not self.home:
-            raise AMCError("Hit limits %s. Engraving should stop now." % (self.controller.limits,))
-        
-    @when(DwellCommand)
-    def render(self, cmd):
-        print("Sleeping %dms" % (cmd.p))
-        time.sleep(cmd.p / 1000)
-
-    @when(M3)
-    def render(self, cmd):
-        self.controller.set_spindle(not self.keep_spindle_off)
-    @when(M5)
-    def render(self, cmd):
-        self.controller.set_spindle(False)
-
 
 
 _RE_AXES=r"(?P<x>[-\d]+),(?P<y>[-\d]+),(?P<z>[-\d]+)"

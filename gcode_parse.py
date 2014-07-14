@@ -4,87 +4,135 @@
 # A simple gcode parser - no variables, intended to cover pcb2gcode output only
 # -----------------------------------------------------------------------------
 
-# Tokens
 
-import itertools
+import itertools, re
+import ply.lex as lex
 
-command = {
-    'G00' : 'RAPID_MOVE',
-    'G01' : 'LINEAR_MOVE',
-#    'G02' : 'CLOCKWISE_MOVE',
-#    'G03' : 'COUNTER_CLOCKWISE_MOVE',
-    'G04' : 'DWELL',
+# Public interface
 
-    'G20' : 'INCHES',
-    'G21' : 'MM',
+def parse(content):
+    lexer.lineno = 1
+    lexer.input(content)
 
-    'G90' : 'ABSOLUTE',
-    'G91' : 'RELATIVE',
-    'G94' : 'FEEDRATE_PER_MINUTE',
-}
+    ctx = ParserCtx()
+    while True:
+        tok = lexer.token()
+        if tok is None:
+            return
+        try:
+            result = PARSER_FUNCTIONS[tok.type](ctx, tok)
+            if result is not None:
+                yield result
+        except KeyError:
+            raise ParserException("Unexpected token in stream: %s" % tok)
 
-tokens = [
-    'ARGUMENT',
-    'NUMBER',
-    'COMMAND',
-    ]
 
-def t_ARGUMENT(t):
-    r'([XYZPF])(-?[0-9]*\.?[0-9]+)'
-    t.value = (t.lexer.lexmatch.group(2), float(t.lexer.lexmatch.group(3)))
-    return t
+def parse_file(filepath):
+    with open(filepath) as f:
+        return list(parse(f.read()))
+
+class ParserException(Exception):
+    pass
+
+
+# Tokeniser
+
+tokens = (
+   'COMMAND',
+   'SPINDLE_COMMAND',
+   'PARAM',
+   'COMMENT',
+   'newline',
+)
 
 def t_COMMAND(t):
-    r'[GMS][0-9]+'
+    r'[GMT][0-9]+'
+    while len(t.value) > 2 and t.value[1] == '0': # strip M06 to M6, and such
+        t.value = t.value[0] + t.value[2:]
+    return t
+
+def t_SPINDLE_COMMAND(t):
+    r'S[0-9]+'
+    t.value = int(t.value[1:])
+    return t
+
+def t_PARAM(t):
+    r'[XYZFPR]-?([0-9]+\.)?[0-9]+'
+    t.value = (t.value[0],
+               float(t.value[1:]))
     return t
 
 def t_COMMENT(t):
-    r'\(([^)]+)\)'
-    pass
-
-def t_NUMBER(t):
-    r'-?[0-9]*\.?[0-9]+'
-    t.value = float(t.value) if "." in t.value else int(t.value)
+    r'\(([^)]*)\)'
+    t.value = t.value[1:-1]
     return t
 
 def t_newline(t):
     r'\n+'
-    t.lexer.lineno += t.value.count("\n")
-    return None
+    t.lexer.lineno += len(t.value)
+    return t
 
-def t_whitespace(t):
-    r'[ \t]'
-    pass
+t_ignore  = ' \t'
 
 def t_error(t):
-    print("Illegal character '%s'" % t.value[0])
-    t.lexer.skip(1)
+    raise ParserException("Illegal character '%s' at line %d" % (t.value[0],
+                                                 t.lexer.lineno))
 
-# Build the lexer
-import ply.lex as lex
 lexer = lex.lex()
 
-def parse(content):
-    lexer.input(content)
-    command = None
-    for tok in lexer:
-        if tok.type == "COMMAND":
-            if command:
-                yield command
-            command = { "name" : tok.value, "line" : tok.lexer.lineno }
-        elif tok.type == "ARGUMENT":
-            tag,value = tok.value
-            if tag in command:
-                yield command
-                command = { "name" : command["name"], "line" : tok.lexer.lineno }
-            else:
-                command[tag] = value
-
-content = open("front.ngc").read()
-
-x = list(parse(content))
-print len(x)
-#for c in parse(content):
-#    print c
+# the sticky commands are the ones where the same command may be repeated on a new line without repeating the command tag
+STICKY_COMMANDS = [ "G1", "G81" ]
 
 
+class ParserCtx:
+    def __init__(self):
+        self.command = None
+        self.sticky_command = None
+        self.has_args = False
+
+def parse_command(ctx, tok):
+    ctx.command = { 'name' : tok.value,
+                'line' : tok.lineno,
+                }
+    ctx.has_args = True
+    if tok.value in STICKY_COMMANDS:
+        ctx.sticky_command = ctx.command
+
+def parse_spindle_command(ctx, tok):
+    ctx.command = { 'name' : 'S',
+                    'line' : tok.lineno,
+                    'S' : tok.value,
+                    }
+    ctx.has_args = True
+
+def parse_param(ctx, tok):
+    if ctx.command is None:
+        raise ParserException("Got parameter without a defined command on line %d" % tok.lineno)
+    ctx.command[tok.value[0]] = tok.value[1]
+    ctx.command['line'] = tok.lineno
+    ctx.has_args = True
+
+def parse_newline(ctx, tok):
+    old_command = ctx.command
+    has_args = ctx.has_args
+
+    try:
+        ctx.command = ctx.sticky_command.copy()
+    except AttributeError:
+        ctx.command = None
+    ctx.has_args = False
+
+    if old_command is not None and has_args:
+        return old_command
+
+def parse_comment(ctx,tok):
+    name = "message" if tok.value.startswith("MSG") else "comment"
+    return { "name" : name, "value" : tok.value.strip(), "line" : tok.lineno }
+
+PARSER_FUNCTIONS = {
+    "COMMAND" : parse_command,
+    "SPINDLE_COMMAND" : parse_spindle_command,
+    "PARAM" : parse_param,
+    "newline" : parse_newline,
+    "COMMENT" : parse_comment,
+    }
